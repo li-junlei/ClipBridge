@@ -34,10 +34,11 @@ final class Protocol {
         if(e.getInt("version")!=1 || clock<1 || clock>9007199254740991L || e.getString("from").equals(e.getString("to"))) throw new IllegalArgumentException("Invalid envelope");
         return "clipbridge:1:"+e.getString("pair")+":"+e.getString("from")+":"+e.getString("to")+":"+e.getString("id")+":"+clock;
     }
-    static JSONObject seal(JSONObject c,long clock,String text) throws Exception {
+    static JSONObject seal(JSONObject c,long clock,String text)throws Exception{return seal(c,clock,text,"","");}
+    static JSONObject seal(JSONObject c,long clock,String text,String event,String origin)throws Exception{return seal(c,clock,text,event,origin,System.currentTimeMillis()/1000,0);}
+    static JSONObject seal(JSONObject c,long clock,String text,String event,String origin,long now,long eventClock) throws Exception {
         if(text.getBytes(StandardCharsets.UTF_8).length>65536) throw new IllegalArgumentException("Text too large");
-        long now=System.currentTimeMillis()/1000;
-        JSONObject p=new JSONObject().put("kind","text").put("text",text).put("created",now).put("expires",now+600);
+        JSONObject p=new JSONObject().put("kind","text").put("text",text).put("created",now).put("expires",now+600).put("eventId",event).put("origin",origin).put("eventClock",eventClock);
         byte[] nonce=new byte[12]; new SecureRandom().nextBytes(nonce);
         JSONObject e=new JSONObject().put("version",1).put("pair",c.getString("pair")).put("from",c.getString("device")).put("to",c.getString("peer"))
             .put("id",UUID.randomUUID().toString().replace("-", "")).put("clock",clock).put("nonce",encode(nonce));
@@ -45,7 +46,8 @@ final class Protocol {
         return e;
     }
     static final class ExpiredMessage extends SecurityException {}
-    static String open(JSONObject c,JSONObject e) throws Exception {
+    static String open(JSONObject c,JSONObject e)throws Exception{return payload(c,e).getString("text");}
+    static JSONObject payload(JSONObject c,JSONObject e) throws Exception {
         String h=header(e);
         if(!e.getString("pair").equals(c.getString("pair")) || !e.getString("from").equals(c.getString("peer")) || !e.getString("to").equals(c.getString("device"))) throw new SecurityException("Wrong peer");
         byte[] nonce=decode(e.getString("nonce")), data=decode(e.getString("data"));
@@ -57,7 +59,7 @@ final class Protocol {
             String text=p.getString("text");
             if(!p.getString("kind").equals("text") || text.getBytes(StandardCharsets.UTF_8).length>65536 || created>now+60 || expires<created || expires-created>600) throw new SecurityException("Expired or invalid payload");
             if(expires<=now)throw new ExpiredMessage();
-            return text;
+            return p;
         } finally { java.util.Arrays.fill(plain,(byte)0); }
     }
 }

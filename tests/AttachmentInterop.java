@@ -1,0 +1,5 @@
+package io.clipbridge.android;
+import org.json.*;import java.nio.file.*;import java.nio.charset.StandardCharsets;
+public final class AttachmentInterop {
+ public static void main(String[] args)throws Exception{JSONObject fixture=new JSONObject(Files.readString(Path.of(args[0])));JSONObject sender=fixture.getJSONObject("sender"),receiver=fixture.getJSONObject("receiver");String id=fixture.getString("id");byte[] cipher=Protocol.decode(fixture.getString("chunk"));String text=new String(MediaProtocol.decrypt(receiver,id,0,cipher),StandardCharsets.UTF_8);if(!text.equals("interop attachment 中文"))throw new AssertionError();try{MediaProtocol.decrypt(receiver,id,1,cipher);throw new AssertionError();}catch(javax.crypto.AEADBadTagException expected){}JSONObject index=MediaProtocol.openIndex(receiver,fixture.getJSONObject("index").toString());if(index.getJSONArray("offers").length()!=1)throw new AssertionError();byte[] response=MediaProtocol.encrypt(sender,id,0,"interop attachment 中文".getBytes(StandardCharsets.UTF_8));Files.write(Path.of(args[1]),response);System.out.println("PASS Android/.NET chunk and encrypted manifest interoperability");}
+}

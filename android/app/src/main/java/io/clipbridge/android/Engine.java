@@ -14,7 +14,8 @@ final class Engine {
     private final ClipboardManager clipboard;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ClipBridge-worker");t.setDaemon(true);return t;});
-    private final AtomicReference<String> local=new AtomicReference<>();
+    private static final class LocalClip{final String text,event;final long created,clock;LocalClip(String text,String event){this.text=text;this.event=event;created=EngineRouter.created();clock=EngineRouter.clock();}}
+    private final AtomicReference<LocalClip> local=new AtomicReference<>();
     private final AtomicReference<JSONObject> remote=new AtomicReference<>();
     private final AtomicLong generation=new AtomicLong();
     private volatile JSONObject config;
@@ -24,14 +25,19 @@ final class Engine {
     private long nextLoad=0,nextSend=0,nextIdentity=0;
     private int failures=0;
     private volatile WebDav dav;
-    Engine(Context c){context=c;clipboard=(ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);}
+    private ClipboardManager.OnPrimaryClipChangedListener listener;
+    private final String pair;private volatile boolean running=true;private String installation="";
+    Engine(Context c,String pair){this.pair=pair;context=c;clipboard=(ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);}
+    boolean ready(){return running&&config!=null&&!paused;}
+    void queue(String text,String event){local.set(new LocalClip(text,event));generation.incrementAndGet();}
+    void stop(){running=false;paused=true;worker.shutdownNow();if(listener!=null)main.post(()->clipboard.removePrimaryClipChangedListener(listener));config=null;}
     void start(){
-        Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ClipBridge-heartbeat");t.setDaemon(true);return t;}).scheduleWithFixedDelay(()->{try{context.getContentResolver().call(BridgeProvider.URI,"heartbeat",null,null);}catch(Throwable ignored){}},0,5,TimeUnit.SECONDS);
-        clipboard.addPrimaryClipChangedListener(()->{
+        if(!running)return;
+        listener=()->{
             try {
                 if(paused || config==null) return;
                 ClipData clip=clipboard.getPrimaryClip();
-                if(clip==null || clip.getItemCount()!=1) return;
+                if(clip==null || clip.getItemCount()!=1 || "ClipBridge".equals(String.valueOf(clip.getDescription().getLabel()))) return;
                 PersistableBundle extras=clip.getDescription().getExtras();
                 if(extras!=null && extras.getBoolean("android.content.extra.IS_SENSITIVE",false)) return;
                 // Never coerce URI/file clips into text; that may perform provider I/O inside SystemUI.
@@ -39,61 +45,64 @@ final class Engine {
                 if(text==null || text.length()>65536) return;
                 String s=text.toString();
                 if(s.equals(lastObserved)) return;
-                lastObserved=s;generation.incrementAndGet();local.set(s);
+                lastObserved=s;EngineRouter.copy(s);
             }catch(Throwable ignored){}
-        });
+        };clipboard.addPrimaryClipChangedListener(listener);
         worker.scheduleWithFixedDelay(()->{try{tick();}catch(Throwable e){status("同步异常，稍后重试");}},0,300,TimeUnit.MILLISECONDS);
         Thread receiver=new Thread(this::receiveLoop,"ClipBridge-receiver");receiver.setDaemon(true);receiver.start();
     }
-    private void status(String s){try{context.getContentResolver().call(BridgeProvider.URI,"status",s,null);}catch(Throwable ignored){}}
+    private void status(String s){try{context.getContentResolver().call(BridgeProvider.URI,"status",s,identityBundle());}catch(Throwable ignored){}}
     private void save(JSONObject next) throws Exception {
         Bundle identity=new Bundle();identity.putString("pair",config.getString("pair"));identity.putString("device",config.getString("device"));
-        context.getContentResolver().call(BridgeProvider.URI,"save",next.toString(),identity);state=next;
+        identity.putByteArray("state",next.toString().getBytes(StandardCharsets.UTF_8));context.getContentResolver().call(BridgeProvider.URI,"save",null,identity);state=next;
     }
     private void tick() throws Exception {
         long now=System.currentTimeMillis();
         if(now>=nextLoad){
             nextLoad=now+5000;
             try {
-                Bundle b=context.getContentResolver().call(BridgeProvider.URI,"load",null,null);
+                Bundle b=context.getContentResolver().call(BridgeProvider.URI,"load",pair,null);
 
-                paused=b.getBoolean("paused");
+                paused=b.getBoolean("paused");installation=b.getString("installation","");
                 if(!b.containsKey("config")){paused=true;config=null;state=null;local.set(null);remote.set(null);generation.incrementAndGet();lastObserved=null;return;}
                 if(b.containsKey("config") && (config==null || !config.toString().equals(b.getString("config")))){
                     JSONObject c=new JSONObject(b.getString("config"));Protocol.config(c);
-                    JSONObject saved=new JSONObject(b.getString("state"));Protocol.state(c,saved);
+                    JSONObject saved=new JSONObject(new String(b.getByteArray("state"),StandardCharsets.UTF_8));Protocol.state(c,saved);
                     local.set(null);remote.set(null);generation.incrementAndGet();
                     dav="webdav".equals(c.optString("transport"))?new WebDav(c.getString("server"),c.getString("username"),c.getString("password"),c.getString("pair")):null;
-                    state=saved;config=c;nextSend=0;nextIdentity=0;lastObserved=null;status("模块已连接，等待剪贴板变化");
+                    state=saved;config=c;if(saved.has("pending")&&!saved.optString("pendingEvent").isEmpty()){JSONObject reverse=new JSONObject(c.toString()).put("device",c.getString("peer")).put("peer",c.getString("device"));try{JSONObject payload=Protocol.payload(reverse,saved.getJSONObject("pending"));EngineRouter.restore(pair,saved.getString("pendingEvent"),payload.getString("text"),payload.getLong("created"),payload.optLong("eventClock"),saved.optString("pendingTargets","[]"));}catch(Exception ignored){}}
+                    nextSend=0;nextIdentity=0;lastObserved=null;status("模块已连接，等待剪贴板变化");
                 }
             } catch(Exception e){paused=true;status("配置暂不可用；解锁后自动重试");return;}
         }
         JSONObject c=config;if(c==null || paused) return;
         if(now>=nextIdentity){nextIdentity=now+15000;try{
             JSONObject nameChannel=identityConfig(c);
-            request(c,"POST","v1/device-info",Protocol.seal(nameChannel,System.currentTimeMillis(),deviceName()).toString());
+            request(c,"POST","v1/device-info",Protocol.seal(nameChannel,System.currentTimeMillis(),new JSONObject().put("name",deviceName()).put("installation",installation).toString()).toString());
             String data=request(c,"GET","v1/device-info",null);
-            if(!data.trim().equals("null")){String name=Protocol.open(nameChannel,new JSONObject(data));if(name.length()>80 || name.isBlank() || name.matches(".*[\\p{Cntrl}].*"))throw new SecurityException();metrics(c,"peerName",name);}
+            if(!data.trim().equals("null")){String name=Protocol.open(nameChannel,new JSONObject(data));if(name.startsWith("{")){JSONObject peer=new JSONObject(name);String peerId=peer.getString("installation");Protocol.id(peerId);metrics(c,"peerIdentity",peerId);name=peer.getString("name");}if(name.length()>80 || name.isBlank() || name.matches(".*[\\p{Cntrl}].*"))throw new SecurityException();metrics(c,"peerName",name);}
         }catch(Exception ignored){}}
-        String text=local.getAndSet(null);
+        LocalClip clip=local.getAndSet(null);String text=clip==null?null:clip.text;
         if(text!=null && text.getBytes(StandardCharsets.UTF_8).length>65536){
             status("文本超过 64 KiB，已跳过");
         } else if(text!=null){
             try{
                 long clock=Math.addExact(state.getLong("clock"),1);
-                JSONObject envelope=Protocol.seal(c,clock,text);
-                JSONObject next=new JSONObject().put("clock",clock).put("winner",c.getString("device")).put("pending",envelope);
+                String event=clip.event;JSONObject envelope=Protocol.seal(c,clock,text,event,installation,clip.created,clip.clock);
+                JSONObject next=new JSONObject().put("clock",clock).put("winner",c.getString("device")).put("pending",envelope).put("pendingEvent",event).put("pendingTargets",EngineRouter.targetList());
                 save(next);
-            }catch(Exception e){local.compareAndSet(null,text);throw e;}
+            }catch(Exception e){local.compareAndSet(null,clip);throw e;}
         }
         JSONObject incoming=remote.getAndSet(null);
         if(incoming!=null){
             try {
                 String content=Protocol.open(c,incoming);
+                JSONObject payload=Protocol.payload(c,incoming);String incomingEvent=payload.optString("eventId");
+                if(!incomingEvent.isEmpty()){Bundle seen=identityBundle();seen.putString("origin",payload.getString("origin"));seen.putLong("eventClock",payload.optLong("eventClock"));if(!context.getContentResolver().call(BridgeProvider.URI,"seen",incomingEvent,seen).getBoolean("first"))return;}
                 long clock=incoming.getLong("clock"),current=state.getLong("clock");String from=incoming.getString("from");
                 if(clock>current || (clock==current && from.compareTo(state.getString("winner"))>0)){
                     long expected=generation.get();
-                    save(new JSONObject().put("clock",clock).put("winner",from));
+                    EngineRouter.success(pair,state.optString("pendingEvent"));save(new JSONObject().put("clock",clock).put("winner",from));
                     main.post(()->{
                         try{
                             if(paused || generation.get()!=expected || !isCurrent(c)) return;
@@ -106,17 +115,18 @@ final class Engine {
             }catch(Exception e){status("已拒绝消息或无法保存接收状态");}
         }
         if(state.has("pending") && now>=nextSend){
-            JSONObject pending=state.getJSONObject("pending");
+            JSONObject pending=state.getJSONObject("pending");String pendingEvent=state.optString("pendingEvent");
+            if(!EngineRouter.owns(pair,pendingEvent)){JSONObject clean=new JSONObject(state.toString());clean.remove("pending");save(clean);return;}
             try{
                 request(c,"POST","v1/messages",pending.toString());
                 JSONObject next=new JSONObject(state.toString());next.remove("pending");save(next);failures=0;nextSend=now+1000;
-                metrics(c,"lastSync",System.currentTimeMillis());status("已发送");
-            }catch(Exception e){failures=Math.min(failures+1,6);nextSend=now+Math.min(60000,(1L<<failures)*1000);status("发送失败，等待重试");}
+                EngineRouter.success(pair,pendingEvent);metrics(c,"lastSync",System.currentTimeMillis());status("已发送");
+            }catch(Exception e){EngineRouter.failure(pair,pendingEvent);JSONObject clean=new JSONObject(state.toString());clean.remove("pending");save(clean);failures=Math.min(failures+1,6);nextSend=now+Math.min(60000,(1L<<failures)*1000);status("发送失败，等待重试");}
         }
     }
     private void receiveLoop(){
         String after="";int failures=0;
-        while(true){
+        while(running){
             try{
                 JSONObject c=config;
                 if(c==null || paused){Thread.sleep(1000);continue;}
@@ -124,7 +134,7 @@ final class Engine {
                 if(response.trim().equals("null") && !paused && config==c) status("连接正常，等待新内容");
                 if(!response.trim().equals("null")){
                     JSONObject e=new JSONObject(response);Protocol.header(e);
-                    if(!paused && config==c){
+                    if(running && !paused && config==c){
                         // Validate before handing off. Untrusted traffic cannot fill a work queue.
                         if(!e.getString("id").equals(after)){
                             try{Protocol.open(c,e);remote.set(e);}catch(Protocol.ExpiredMessage ignored){}
@@ -137,8 +147,9 @@ final class Engine {
             try{Thread.sleep(failures==0 && config!=null && "webdav".equals(config.optString("transport"))?2000:Math.min(60000,(1L<<failures)*1000));}catch(InterruptedException e){return;}
         }
     }
+    private Bundle identityBundle(){Bundle b=new Bundle();b.putString("pair",pair);return b;}
     private String deviceName(){String name=android.provider.Settings.Global.getString(context.getContentResolver(),"device_name");if(name==null || name.isBlank())name=android.os.Build.MODEL;name=name.replaceAll("[\\p{Cntrl}]","");return name.substring(0,Math.min(80,name.length()));}
-    private boolean isCurrent(JSONObject c){try{Bundle loaded=context.getContentResolver().call(BridgeProvider.URI,"load",null,null);if(!loaded.containsKey("config") || loaded.getBoolean("paused"))return false;JSONObject active=new JSONObject(loaded.getString("config"));return active.getString("pair").equals(c.getString("pair")) && active.getString("device").equals(c.getString("device"));}catch(Exception e){return false;}}
+    private boolean isCurrent(JSONObject c){try{Bundle loaded=context.getContentResolver().call(BridgeProvider.URI,"load",pair,null);if(!loaded.containsKey("config") || loaded.getBoolean("paused"))return false;JSONObject active=new JSONObject(loaded.getString("config"));return active.getString("pair").equals(c.getString("pair")) && active.getString("device").equals(c.getString("device"));}catch(Exception e){return false;}}
     private JSONObject identityConfig(JSONObject c) throws Exception {
         javax.crypto.Mac mac=javax.crypto.Mac.getInstance("HmacSHA256");mac.init(new javax.crypto.spec.SecretKeySpec(Protocol.decode(c.getString("key")),"HmacSHA256"));
         return new JSONObject(c.toString()).put("key",Protocol.encode(mac.doFinal("clipbridge:device-name:1".getBytes(StandardCharsets.US_ASCII))));

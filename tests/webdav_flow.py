@@ -22,13 +22,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     elif self.path.rstrip('/').rsplit('/',1)[0]+'/' not in collections:code=409
     else:collections.add(self.path);code=201
     self.send_response(code);self.end_headers();return
+   if self.command=='DELETE':
+    files.pop(self.path,None);self.send_response(204);self.end_headers();return
    if self.command=='PUT':
     body=self.rfile.read(int(self.headers['Content-Length']));seen.append(body)
     if self.path.rsplit('/',1)[0]+'/' not in collections:self.send_response(409);self.end_headers();return
     files[self.path]=body;self.send_response(201);self.end_headers();return
    data=files.get(self.path);self.send_response(200 if data else 404);self.end_headers()
    if data:self.wfile.write(data)
- do_GET=do_PUT=do_MKCOL=handle_request
+ do_GET=do_PUT=do_MKCOL=do_DELETE=handle_request
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
  with tempfile.TemporaryDirectory(prefix='clipbridge-webdav-') as tmp:

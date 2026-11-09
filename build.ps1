@@ -14,6 +14,10 @@ try {
     if ($LASTEXITCODE) { throw 'Protocol checks failed' }
     python tests/integration.py
     if ($LASTEXITCODE) { throw 'Integration checks failed' }
+    python tests/attachment_flow.py
+    if ($LASTEXITCODE) { throw 'Attachment checks failed' }
+    python tests/relay_attachment_flow.py
+    if ($LASTEXITCODE) { throw 'Relay attachment checks failed' }
     python tests/webdav_flow.py
     if ($LASTEXITCODE) { throw 'WebDAV checks failed' }
     if ($Android) {

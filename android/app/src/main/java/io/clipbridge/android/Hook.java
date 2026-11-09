@@ -17,7 +17,7 @@ public final class Hook implements IXposedHookLoadPackage {
                 if(started.compareAndSet(false,true)){
                     Context context=(Context)param.args[0];
                     new android.os.Handler(android.os.Looper.getMainLooper()).post(()->{
-                        try{new Engine(context).start();}catch(Throwable ignored){started.set(false);}
+                        try{EngineRouter.start(context);}catch(Throwable ignored){started.set(false);}
                     });
                 }
             }

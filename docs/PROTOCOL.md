@@ -43,3 +43,13 @@ clock 为无前导零十进制。每条消息生成新的随机 128 位 id 和 9
 POST /v1/device-info 和 GET /v1/device-info 使用现有设备认证和独立内存收件箱，仅保存/返回对方的密文 Envelope，定期重新发布。
 消息加密前用 HMAC-SHA256(rootKey, ASCII("clipbridge:device-name:1")) 派生名称通道密钥，再沿用 Wire 的 AES-GCM 消息封装及过期检查。通道隔离防止名称密文被当作剪贴板内容。
 名称最多 80 个字符，拒绝控制字符。不增加剪贴板逻辑时钟，不触发最后同步时间。
+
+## v0.5 附件与跨连接去重
+
+设备元数据在原有独立加密通道内携带名称和随机 32 位十六进制安装标识。文本载荷增加 eventId、origin、eventClock；每个安装递增计数，接收端绑定已确认来源标识并持久化高水位，旧客户端缺省字段仍兼容。
+
+附件清单使用独立根通道密钥 `HMAC-SHA256(root, ASCII("clipbridge:attachments-index:1"))`，再按普通 Envelope 的认证头派生消息密钥。清单包含 offers、decisions、created、expires，有效期一小时；不是剪贴板文本载荷。单个清单最多 32 个 offer 和 128 个 decision。
+
+分块 AAD 为 ASCII `clipbridge:attachment:1:{pair}:{from}:{to}:{transfer-id}:{part}`，分块密钥为 `HMAC-SHA256(root, AAD)`。二进制布局是 12 字节随机 nonce、密文、16 字节 GCM tag。分块最多 256 KiB，索引 0–399，单文件最多 100 MiB，完整文件 SHA-256 在加密清单内传输。接收端在所有块认证和完整摘要验证后才保存文件。
+
+专用中转通过 `attachments: 1` 声明能力。对象接口为 `/v1/objects/{device}/{index|transfer-id-part}`，PUT/DELETE 只允许本人设备，GET 只允许配对内设备。服务端只校验密文外层和大小，不持有内容密钥。每设备 512 MiB / 8192 对象配额，24 小时过期，后续写入触发清理。

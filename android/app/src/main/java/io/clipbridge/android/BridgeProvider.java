@@ -1,113 +1,46 @@
 package io.clipbridge.android;
-
-import android.content.ContentProvider;
-import android.content.ContentValues;
-import android.content.SharedPreferences;
+import android.content.*;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Binder;
-import android.os.Bundle;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
+import android.os.*;
+import android.security.keystore.*;
 import java.security.KeyStore;
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
+import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
 import java.nio.charset.StandardCharsets;
-import org.json.JSONObject;
-
+import org.json.*;
 public final class BridgeProvider extends ContentProvider {
-    static final Uri URI=Uri.parse("content://io.clipbridge.android.bridge");
-    private SharedPreferences prefs;
-    public boolean onCreate(){ prefs=getContext().getSharedPreferences("bridge",0); return true; }
-    private void authorize() {
-        int caller=Binder.getCallingUid();
-        if(caller==android.os.Process.myUid()) return;
-        try {
-            int uid=getContext().getPackageManager().getApplicationInfo("com.android.systemui",0).uid;
-            if(caller==uid) return;
-        } catch(Exception ignored){}
-        throw new SecurityException("Caller not allowed");
-    }
-    private SecretKey key() throws Exception {
-        KeyStore ks=KeyStore.getInstance("AndroidKeyStore"); ks.load(null);
-        if(!ks.containsAlias("clipbridge.config")) {
-            KeyGenerator g=KeyGenerator.getInstance("AES","AndroidKeyStore");
-            g.init(new KeyGenParameterSpec.Builder("clipbridge.config",KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build()); g.generateKey();
+    static final Uri URI=Uri.parse("content://io.clipbridge.android.bridge");private SharedPreferences prefs;
+    public boolean onCreate(){prefs=getContext().getSharedPreferences("bridge",0);return true;}
+    private void authorize(){int caller=Binder.getCallingUid();if(caller==android.os.Process.myUid())return;try{if(caller==getContext().getPackageManager().getApplicationInfo("com.android.systemui",0).uid)return;}catch(Exception ignored){}throw new SecurityException();}
+    private void own(){if(Binder.getCallingUid()!=android.os.Process.myUid())throw new SecurityException();}
+    private SecretKey key()throws Exception{KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);if(!store.containsAlias("clipbridge.config")){KeyGenerator g=KeyGenerator.getInstance("AES","AndroidKeyStore");g.init(new KeyGenParameterSpec.Builder("clipbridge.config",KeyProperties.PURPOSE_ENCRYPT|KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());g.generateKey();}return(SecretKey)store.getKey("clipbridge.config",null);}
+    private String wrap(String text)throws Exception{Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,key());return Protocol.encode(c.getIV())+":"+Protocol.encode(c.doFinal(text.getBytes(StandardCharsets.UTF_8)));}
+    private String unwrap(String text)throws Exception{String[] parts=text.split(":");Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Protocol.decode(parts[0])));return new String(c.doFinal(Protocol.decode(parts[1])),StandardCharsets.UTF_8);}
+    private JSONArray profiles()throws Exception{if(prefs.contains("profiles"))return new JSONArray(unwrap(prefs.getString("profiles","")));JSONArray list=new JSONArray();if(prefs.contains("config")){JSONObject config=new JSONObject(unwrap(prefs.getString("config","")));JSONObject state=new JSONObject(unwrap(prefs.getString("state","")));Protocol.config(config);Protocol.state(config,state);list.put(new JSONObject().put("config",config).put("state",state).put("enabled",true).put("name",prefs.getString("peerName","")).put("lastSync",prefs.getLong("lastSync",0)));save(list);if(!prefs.edit().remove("config").remove("state").remove("peerName").remove("lastSync").commit())throw new IllegalStateException();}return list;}
+    private void save(JSONArray list)throws Exception{if(!prefs.edit().putString("profiles",wrap(list.toString())).commit())throw new IllegalStateException();}
+    private JSONObject find(JSONArray list,String pair)throws Exception{for(int i=0;i<list.length();i++){JSONObject p=list.getJSONObject(i);if(pair==null || p.getJSONObject("config").getString("pair").equals(pair))return p;}return null;}
+    private boolean same(JSONObject a,JSONObject b)throws Exception{for(String key:new String[]{"server","pair","device","peer","token","key","username","password","transport"}){String fallback=key.equals("transport")?"relay":"";String av=a.optString(key,fallback),bv=b.optString(key,fallback);if(key.equals("server")){av=av.replaceAll("/+$","");bv=bv.replaceAll("/+$","");}if(!av.equals(bv))return false;}return true;}
+    private String installation(){String id=prefs.getString("installation",null);if(id==null){id=java.util.UUID.randomUUID().toString().replace("-","");if(!prefs.edit().putString("installation",id).commit())throw new IllegalStateException();}return id;}
+    @Override public synchronized Bundle call(String method,String arg,Bundle extras){authorize();Bundle out=new Bundle();try{
+        JSONArray list=profiles();String pair=extras==null?null:extras.getString("pair");JSONObject p=find(list,pair),c=p==null?null:p.getJSONObject("config");
+        switch(method){
+            case "profiles":JSONArray overview=new JSONArray();for(int i=0;i<list.length();i++){JSONObject row=new JSONObject(list.getJSONObject(i).toString());row.remove("state");overview.put(row);}out.putString("profiles",overview.toString());out.putString("installation",installation());out.putLong("moduleSeenAt",prefs.getLong("moduleSeenAt",0));out.putBoolean("paused",prefs.getBoolean("paused",false));break;
+            case "import":case "replace":own();JSONObject next=new JSONObject(arg);Protocol.config(next);JSONObject old=find(list,next.getString("pair"));if(old!=null){if(!same(old.getJSONObject("config"),next))throw new IllegalArgumentException();old.put("enabled",true);}else{if(list.length()>=16)throw new IllegalArgumentException();JSONObject tombstones=prefs.contains("tombstones")?new JSONObject(unwrap(prefs.getString("tombstones",""))):new JSONObject();JSONObject state=tombstones.optJSONObject(next.getString("pair"));if(state==null)state=new JSONObject().put("clock",0).put("winner","");state.remove("pending");Protocol.state(next,state);list.put(new JSONObject().put("config",next).put("state",state).put("enabled",true));}save(list);break;
+            case "toggle":own();JSONObject target=find(list,arg);if(target==null)throw new IllegalArgumentException();target.put("enabled",extras.getBoolean("enabled"));if(!extras.getBoolean("enabled"))target.getJSONObject("state").remove("pending");save(list);break;
+            case "delete":own();JSONObject stones=prefs.contains("tombstones")?new JSONObject(unwrap(prefs.getString("tombstones",""))):new JSONObject();JSONArray kept=new JSONArray();for(int i=0;i<list.length();i++){JSONObject entry=list.getJSONObject(i);String id=entry.getJSONObject("config").getString("pair");if(arg!=null&&!id.equals(arg)){kept.put(entry);continue;}JSONObject state=entry.getJSONObject("state");state.remove("pending");stones.put(id,state);}if(!prefs.edit().putString("tombstones",wrap(stones.toString())).putString("profiles",wrap(kept.toString())).commit())throw new IllegalStateException();break;
+            case "load":JSONObject entry=find(list,arg);if(entry!=null&&entry.optBoolean("enabled",true)){out.putString("config",entry.getJSONObject("config").toString());out.putByteArray("state",entry.getJSONObject("state").toString().getBytes(StandardCharsets.UTF_8));out.putString("peerName",entry.optString("name"));out.putLong("lastSync",entry.optLong("lastSync"));}out.putString("installation",installation());out.putBoolean("paused",prefs.getBoolean("paused",false));out.putLong("moduleSeenAt",prefs.getLong("moduleSeenAt",0));break;
+            case "save":if(arg==null && extras!=null && extras.getByteArray("state")!=null)arg=new String(extras.getByteArray("state"),StandardCharsets.UTF_8);if(arg==null || arg.length()>600000 || c==null || !p.optBoolean("enabled",true) || extras==null || !c.getString("device").equals(extras.getString("device")))throw new IllegalStateException();JSONObject state=new JSONObject(arg);Protocol.state(c,state);p.put("state",state);save(list);break;
+            case "metrics":if(c==null || !p.optBoolean("enabled",true) || extras==null || !c.getString("device").equals(extras.getString("device")))throw new IllegalStateException();if(extras.containsKey("peerName")){String name=extras.getString("peerName");if(name==null||name.length()>80)throw new IllegalArgumentException();p.put("name",name);}if(extras.containsKey("peerIdentity")){String id=extras.getString("peerIdentity");Protocol.id(id);p.put("peerIdentity",id);}if(extras.containsKey("lastSync"))p.put("lastSync",extras.getLong("lastSync"));save(list);break;
+            case "status":if(arg!=null&&arg.length()<120&&p!=null){p.put("status",arg);save(list);}out.putString("status",p==null?"未配置":p.optString("status","等待连接"));break;
+            case "new-event":long clock=Math.addExact(prefs.getLong("event-clock",0),1);if(!prefs.edit().putLong("event-clock",clock).commit())throw new IllegalStateException();out.putLong("clock",clock);break;
+            case "seen":if(c==null || extras==null)throw new IllegalStateException();Protocol.id(arg);String origin=extras.getString("origin");Protocol.id(origin);if(p.optString("peerIdentity").length()==32&&!origin.equals(p.optString("peerIdentity")))throw new SecurityException();if(p.optString("peerIdentity").isEmpty()){p.put("peerIdentity",origin);save(list);}long sourceClock=extras.getLong("eventClock");JSONObject clocks=prefs.contains("seen-clocks")?new JSONObject(unwrap(prefs.getString("seen-clocks",""))):new JSONObject();if(sourceClock>0&&clocks.optLong(origin)>=sourceClock){out.putBoolean("first",false);break;}if(sourceClock>0){clocks.put(origin,sourceClock);if(!prefs.edit().putString("seen-clocks",wrap(clocks.toString())).commit())throw new IllegalStateException();}String event=origin+":"+arg;JSONArray seen=prefs.contains("seen")?new JSONArray(unwrap(prefs.getString("seen",""))):new JSONArray();boolean first=true;for(int i=0;i<seen.length();i++)if(event.equals(seen.getString(i)))first=false;if(first){seen.put(event);while(seen.length()>512)seen.remove(0);if(!prefs.edit().putString("seen",wrap(seen.toString())).commit())throw new IllegalStateException();}out.putBoolean("first",first);break;
+            case "pause":own();if(Boolean.parseBoolean(arg)){for(int i=0;i<list.length();i++)list.getJSONObject(i).getJSONObject("state").remove("pending");save(list);}if(!prefs.edit().putBoolean("paused",Boolean.parseBoolean(arg)).commit())throw new IllegalStateException();break;
+            case "heartbeat":prefs.edit().putLong("moduleSeenAt",System.currentTimeMillis()).apply();break;
+            case "attachment-load":own();out.putString("state",prefs.contains("attachment-state")?unwrap(prefs.getString("attachment-state","")):"{\"outgoing\":[],\"incoming\":[]}");break;
+            case "attachment-save":own();if(arg==null||arg.length()>1000000)throw new IllegalArgumentException();new JSONObject(arg);if(!prefs.edit().putString("attachment-state",wrap(arg)).commit())throw new IllegalStateException();break;
+            default:throw new IllegalArgumentException();
         }
-        return (SecretKey)ks.getKey("clipbridge.config",null);
-    }
-    private String wrap(String text) throws Exception {
-        Cipher c=Cipher.getInstance("AES/GCM/NoPadding"); c.init(Cipher.ENCRYPT_MODE,key());
-        return Protocol.encode(c.getIV())+":"+Protocol.encode(c.doFinal(text.getBytes(StandardCharsets.UTF_8)));
-    }
-    private String unwrap(String text) throws Exception {
-        String[] parts=text.split(":"); Cipher c=Cipher.getInstance("AES/GCM/NoPadding");
-        c.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Protocol.decode(parts[0])));
-        return new String(c.doFinal(Protocol.decode(parts[1])),StandardCharsets.UTF_8);
-    }
-    @Override public synchronized Bundle call(String method,String arg,Bundle extras) {
-        authorize(); Bundle out=new Bundle();
-        try {
-            switch(method) {
-                case "import":
-                case "replace":
-                    if(Binder.getCallingUid()!=android.os.Process.myUid()) throw new SecurityException();
-                    JSONObject c=new JSONObject(arg); Protocol.config(c);
-                    if(prefs.contains("config") && !method.equals("replace")) throw new IllegalStateException("Already paired");
-                    String oldPair=prefs.contains("config")?new JSONObject(unwrap(prefs.getString("config",""))).getString("pair"):null;
-                    SharedPreferences.Editor change=prefs.edit();
-                    if(oldPair!=null) {JSONObject oldState=new JSONObject(unwrap(prefs.getString("state","")));oldState.remove("pending");change.putString("replay."+oldPair,wrap(oldState.toString()));}
-                    String restored=oldPair!=null && oldPair.equals(c.getString("pair"))?prefs.getString("state",null):prefs.getString("replay."+c.getString("pair"),null);
-                    String nextState=restored==null?"{\"clock\":0,\"winner\":\"\"}":unwrap(restored);
-                    JSONObject restoredState=new JSONObject(nextState);restoredState.remove("pending");Protocol.state(c,restoredState);nextState=restoredState.toString();
-                    if(!change.putString("config",wrap(c.toString())).putString("state",wrap(nextState)).remove("peerName").remove("lastSync").putBoolean("paused",false).commit()) throw new IllegalStateException("Storage failed");
-                    break;
-                case "delete":
-                    if(Binder.getCallingUid()!=android.os.Process.myUid()) throw new SecurityException();
-                    SharedPreferences.Editor deletion=prefs.edit();
-                    if(prefs.contains("config")){JSONObject old=new JSONObject(unwrap(prefs.getString("config","")));JSONObject replay=new JSONObject(unwrap(prefs.getString("state","")));replay.remove("pending");deletion.putString("replay."+old.getString("pair"),wrap(replay.toString()));}
-                    if(!deletion.remove("config").remove("state").remove("peerName").remove("lastSync").putBoolean("paused",true).putString("status","未配对").commit())throw new IllegalStateException();
-                    break;
-                case "metrics":
-                    JSONObject current=new JSONObject(unwrap(prefs.getString("config","")));
-                    if(extras==null || !current.getString("pair").equals(extras.getString("pair")) || !current.getString("device").equals(extras.getString("device")))throw new IllegalStateException();
-                    SharedPreferences.Editor metrics=prefs.edit();
-                    if(extras.containsKey("lastSync"))metrics.putLong("lastSync",extras.getLong("lastSync"));
-                    if(extras.containsKey("peerName")){String name=extras.getString("peerName");if(name==null || name.length()>80 || name.matches(".*[\\p{Cntrl}].*"))throw new IllegalArgumentException();metrics.putString("peerName",name);}
-                    if(!metrics.commit())throw new IllegalStateException();break;
-                case "load":
-                    if(prefs.contains("config")) {
-                        if(!prefs.contains("state")) throw new IllegalStateException("Missing replay state; re-pair required");
-                        out.putString("config",unwrap(prefs.getString("config","")));
-                        out.putString("state",unwrap(prefs.getString("state","")));
-                    }
-                    out.putString("peerName",prefs.getString("peerName",""));out.putLong("lastSync",prefs.getLong("lastSync",0));out.putBoolean("paused",prefs.getBoolean("paused",false));out.putLong("moduleSeenAt",prefs.getLong("moduleSeenAt",0)); break;
-                case "save":
-                    if(arg==null || arg.length()>600000) throw new IllegalArgumentException();
-                    JSONObject active=new JSONObject(unwrap(prefs.getString("config","")));
-                    if(extras==null || !active.getString("pair").equals(extras.getString("pair")) || !active.getString("device").equals(extras.getString("device"))) throw new IllegalStateException("Pairing changed");
-                    new JSONObject(arg);
-                    if(!prefs.edit().putString("state",wrap(arg)).commit()) throw new IllegalStateException("Storage failed"); break;
-                case "pause":
-                    if(Binder.getCallingUid()!=android.os.Process.myUid()) throw new SecurityException();
-                    if(!prefs.edit().putBoolean("paused",Boolean.parseBoolean(arg)).commit()) throw new IllegalStateException(); break;
-                case "status":
-                    if(arg!=null && arg.length()<120) prefs.edit().putString("status",arg).apply();
-                    out.putString("status",prefs.getString("status","等待 SystemUI 模块启动")); break;
-                case "heartbeat":
-                    prefs.edit().putLong("moduleSeenAt",System.currentTimeMillis()).apply(); break;
-                default: throw new IllegalArgumentException("Unknown operation");
-            }
-        } catch(SecurityException e){ throw e; }
-        catch(Exception e){ throw new IllegalStateException("ClipBridge storage/configuration unavailable"); }
-        return out;
-    }
-    public Cursor query(Uri u,String[] p,String s,String[] a,String o){ throw new SecurityException(); }
-    public String getType(Uri u){ return null; }
-    public Uri insert(Uri u,ContentValues v){ throw new SecurityException(); }
-    public int delete(Uri u,String s,String[] a){ throw new SecurityException(); }
-    public int update(Uri u,ContentValues v,String s,String[] a){ throw new SecurityException(); }
+    }catch(SecurityException e){throw e;}catch(Exception e){throw new IllegalStateException("ClipBridge storage unavailable");}return out;}
+    public Cursor query(Uri u,String[] p,String s,String[] a,String o){throw new SecurityException();}public String getType(Uri u){return null;}public Uri insert(Uri u,ContentValues v){throw new SecurityException();}public int delete(Uri u,String s,String[] a){throw new SecurityException();}public int update(Uri u,ContentValues v,String s,String[] a){throw new SecurityException();}
 }

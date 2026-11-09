@@ -71,5 +71,10 @@ public sealed class RelayClient : IDisposable
         var envelope = await received.Content.ReadFromJsonAsync<Envelope?>(Wire.Json, ct);
         return envelope is null ? null : DeviceIdentity.Open(config, envelope);
     }
+    public async Task<PeerDevice?> ExchangeDevice(ClientConfig config,string name,string installation,CancellationToken ct){
+        var envelope=DeviceIdentity.Seal(config,name,installation);
+        if(webdav is not null){await webdav.Put(true,envelope,ct);var peer=await webdav.Get(true,ct);return peer is null?null:DeviceIdentity.Read(config,peer);}
+        using var sent=await http.PostAsJsonAsync("v1/device-info",envelope,Wire.Json,ct);sent.EnsureSuccessStatusCode();using var received=await http.GetAsync("v1/device-info",ct);received.EnsureSuccessStatusCode();var e=await received.Content.ReadFromJsonAsync<Envelope?>(Wire.Json,ct);return e is null?null:DeviceIdentity.Read(config,e);
+    }
     public void Dispose() => http.Dispose();
 }

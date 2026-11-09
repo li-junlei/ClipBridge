@@ -52,6 +52,8 @@ var Value: String;
 begin
   if (CurStep = ssPostInstall) and RegQueryStringValue(HKCU, RunKey, 'ClipBridge', Value) and (Value <> '') then
     RegWriteStringValue(HKCU, RunKey, 'ClipBridge', '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --startup');
+  if (CurStep = ssPostInstall) and RegQueryStringValue(HKCU, 'Software\Classes\*\shell\ClipBridge\command', '', Value) then
+    RegWriteStringValue(HKCU, 'Software\Classes\*\shell\ClipBridge\command', '', '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --send "%1"');
 end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var Value: String;
@@ -59,5 +61,8 @@ begin
   if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, RunKey, 'ClipBridge', Value) then
     if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --startup') = 0 then
       RegDeleteValue(HKCU, RunKey, 'ClipBridge');
+  if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\*\shell\ClipBridge\command', '', Value) then
+    if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --send "%1"') = 0 then
+      RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\*\shell\ClipBridge');
   { Pairing data in LocalAppData\ClipBridge is deliberately preserved. }
 end;

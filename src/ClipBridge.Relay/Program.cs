@@ -16,6 +16,7 @@ var registry = new PairingRegistry(config, dataDirectory);
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = 429;
+    o.AddPolicy("attachments",context=>RateLimitPartition.GetFixedWindowLimiter((string?)context.Items["device"]??"anonymous",_=>new FixedWindowRateLimiterOptions{PermitLimit=6000,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     o.AddPolicy("device", context => RateLimitPartition.GetFixedWindowLimiter(
         (string?)context.Items["device"] ?? "public:" + context.Connection.RemoteIpAddress, _ => new FixedWindowRateLimiterOptions
         { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -43,7 +44,7 @@ app.Use(async (context, next) =>
 });
 app.UseRateLimiter();
 app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1 }));
-app.MapGet("/v1/setup/info", () => Results.Ok(new { pairing = 1, deviceInfo = 1, requiresSetupCode = true }));
+app.MapGet("/v1/setup/info", () => Results.Ok(new { pairing = 1, deviceInfo = 1, attachments = 1, requiresSetupCode = true }));
 app.MapPost("/v1/pairings", async (HttpContext ctx) =>
 {
     try
@@ -126,6 +127,38 @@ app.MapGet("/v1/device-info", (HttpContext ctx) => {
     ctx.Response.Headers.CacheControl="no-store";
     return names.TryGetValue((string)ctx.Items["device"]!,out var e) ? Results.Json(e,Wire.Json) : Results.Text("null","application/json");
 }).RequireRateLimiting("device");
+// Opaque attachment index and bounded encrypted chunks. No names or keys are decoded here.
+var objectGate=new SemaphoreSlim(1,1);var objectUsage=new Dictionary<string,(long Bytes,int Count,DateTime Scanned)>();
+string ObjectPath(HttpContext ctx,string device,string key)=>Path.Combine(dataDirectory,"attachments",(string)ctx.Items["pair"]!,device,key+".blob");
+bool ObjectKey(string key)=>key=="index" || System.Text.RegularExpressions.Regex.IsMatch(key,"\\A[0-9a-f]{32}-(?:[0-9]|[1-9][0-9]|[1-3][0-9]{2})\\z");
+app.MapPut("/v1/objects/{device}/{key}",async(HttpContext ctx,string device,string key)=>{
+    if(device!=(string)ctx.Items["device"]! || !ObjectKey(key))return Results.StatusCode(403);
+    using var memory=new MemoryStream();var buffer=new byte[8192];int n;
+    while((n=await ctx.Request.Body.ReadAsync(buffer,ctx.RequestAborted))>0){if(memory.Length+n>(key=="index"?600000:Attachments.ChunkSize+28))return Results.StatusCode(413);memory.Write(buffer,0,n);}
+    var data=memory.ToArray();if(key=="index"){
+        try{var e=JsonSerializer.Deserialize<Envelope>(data,Wire.Json);if(e is null)return Results.BadRequest();Wire.Validate(e);if(e.Pair!=(string)ctx.Items["pair"]! || e.From!=device || !registry.HasDevice(e.Pair,e.To))return Results.StatusCode(403);}catch(Exception ex) when(ex is ArgumentException or FormatException or JsonException){return Results.BadRequest();}
+    }else if(data.Length<28)return Results.BadRequest();
+    await objectGate.WaitAsync(ctx.RequestAborted);try{
+        string path=ObjectPath(ctx,device,key),directory=Path.GetDirectoryName(path)!;Directory.CreateDirectory(directory);
+        if(!objectUsage.TryGetValue(directory,out var usage)||usage.Scanned<DateTime.UtcNow.AddMinutes(-1)){
+            foreach(var old in Directory.GetFiles(directory,"*.blob")){if(File.GetLastWriteTimeUtc(old)<DateTime.UtcNow.AddDays(-1))File.Delete(old);}
+            var currentFiles=Directory.GetFiles(directory,"*.blob");usage=(currentFiles.Sum(f=>new FileInfo(f).Length),currentFiles.Length,DateTime.UtcNow);
+        }
+        long previous=File.Exists(path)?new FileInfo(path).Length:0;if(usage.Bytes-previous+data.Length>512L*1024*1024 || previous==0 && usage.Count>=8192)return Results.StatusCode(507);
+        string temp=path+".tmp";await File.WriteAllBytesAsync(temp,data,ctx.RequestAborted);File.Move(temp,path,true);objectUsage[directory]=(usage.Bytes-previous+data.Length,usage.Count+(previous==0?1:0),usage.Scanned);return Results.Ok();
+    }finally{objectGate.Release();}
+}).RequireRateLimiting("attachments");
+app.MapGet("/v1/objects/{device}/{key}",(HttpContext ctx,string device,string key)=>{
+    if(!ObjectKey(key) || !registry.HasDevice((string)ctx.Items["pair"]!,device))return Results.StatusCode(403);
+    string path=ObjectPath(ctx,device,key);ctx.Response.Headers.CacheControl="no-store";
+    if(!File.Exists(path) || File.GetLastWriteTimeUtc(path)<DateTime.UtcNow.AddDays(-1))return Results.NotFound();
+    return Results.File(File.Open(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete),"application/octet-stream");
+}).RequireRateLimiting("attachments");
+
+app.MapDelete("/v1/objects/{device}/{key}",async(HttpContext ctx,string device,string key)=>{
+    if(device!=(string)ctx.Items["device"]!||!ObjectKey(key))return Results.StatusCode(403);
+    await objectGate.WaitAsync(ctx.RequestAborted);try{string path=ObjectPath(ctx,device,key),directory=Path.GetDirectoryName(path)!;if(File.Exists(path)){long length=new FileInfo(path).Length;File.Delete(path);if(objectUsage.TryGetValue(directory,out var usage))objectUsage[directory]=(Math.Max(0,usage.Bytes-length),Math.Max(0,usage.Count-1),usage.Scanned);}return Results.Ok();}finally{objectGate.Release();}
+}).RequireRateLimiting("attachments");
 app.Run();
 
 record ClaimRequest(string Ticket);

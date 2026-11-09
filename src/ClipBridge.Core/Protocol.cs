@@ -25,7 +25,7 @@ public record ClientConfig(string Server, string Pair, string Device, string Pee
     }
 }
 public record Envelope(int Version, string Pair, string From, string To, string Id, long Clock, string Nonce, string Data);
-public record ClipPayload(string Kind, string Text, long Created, long Expires);
+public record ClipPayload(string Kind, string Text, long Created, long Expires, string EventId = "", string Origin = "", long EventClock = 0);
 public static class Wire
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -49,7 +49,7 @@ public static class Wire
         if (size < 16 || size > 400000) throw new ArgumentException("Invalid ciphertext size.");
     }
     // Each random message ID derives a distinct subkey. Header also authenticates routing and ordering.
-    public static Envelope Seal(ClientConfig c, long clock, string text, long? now = null)
+    public static Envelope Seal(ClientConfig c, long clock, string text, long? now = null, string eventId = "", string origin = "", long eventClock = 0)
     {
         c.Validate();
         if (Encoding.UTF8.GetByteCount(text) > MaxText) throw new ArgumentException("Text exceeds 64 KiB.");
@@ -58,7 +58,7 @@ public static class Wire
             Convert.ToBase64String(RandomNumberGenerator.GetBytes(12)), "");
         var header = Header(e);
         var key = HMACSHA256.HashData(Convert.FromBase64String(c.Key), header);
-        var plain = JsonSerializer.SerializeToUtf8Bytes(new ClipPayload("text", text, time, time + 600), Json);
+        var plain = JsonSerializer.SerializeToUtf8Bytes(new ClipPayload("text", text, time, time + 600,eventId,origin,eventClock), Json);
         var data = new byte[plain.Length + 16];
         try
         {
@@ -68,7 +68,7 @@ public static class Wire
         }
         finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(plain); }
     }
-    public static ClipPayload Open(ClientConfig c, Envelope e, long? now = null)
+    public static ClipPayload Open(ClientConfig c, Envelope e, long? now = null, string eventId = "", string origin = "", long eventClock = 0)
     {
         c.Validate(); Validate(e);
         if (e.Pair != c.Pair || e.From != c.Peer || e.To != c.Device) throw new CryptographicException("Wrong peer.");
