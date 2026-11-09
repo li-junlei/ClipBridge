@@ -1,0 +1,36 @@
+name: clipbridge
+services:
+  relay:
+    image: clipbridge-relay:0.3.1
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18787:8080"
+    volumes:
+      - clipbridge-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  clipbridge-data:
+x-casaos:
+  main: relay
+  architectures: [amd64, arm64]
+  author: ClipBridge contributors
+  category: Utilities
+  title:
+    en_us: ClipBridge
+    zh_cn: ClipBridge
+  tagline:
+    en_us: End-to-end encrypted clipboard relay
+    zh_cn: 端到端加密剪贴板中转
+  description:
+    en_us: Self-hosted ciphertext relay. Build the local image before importing and configure HTTPS separately.
+    zh_cn: 自托管密文中转。导入前先构建本地镜像，并单独配置 HTTPS 反向代理。
+  tips:
+    before_install:
+      en_us: Build clipbridge-relay:0.3.1 first. Preserve the data volume during upgrades.
+      zh_cn: 请先构建 clipbridge-relay:0.3.1；升级时保留数据卷。

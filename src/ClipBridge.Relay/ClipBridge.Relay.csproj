@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk.Web"><ItemGroup><ProjectReference Include="../ClipBridge.Core/ClipBridge.Core.csproj" /></ItemGroup></Project>
