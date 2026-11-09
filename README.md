@@ -6,12 +6,13 @@
 <p align="center">
   <a href="https://github.com/li-junlei/ClipBridge/releases"><img src="https://img.shields.io/github/v/release/li-junlei/ClipBridge?include_prereleases" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/status-preview-orange" alt="Preview">
 </p>
 
 ClipBridge 通过 WebDAV 或 Docker 中转连接 Windows 客户端与 Android LSPosed 模块。剪贴板内容在发送端加密，在接收端解密；中转服务负责认证、路由和保存密文。
 
-**当前版本为开发预览，支持文本、图片与文件互传。** 不兼容原版 SyncClipboard 协议，也不提供明文传输模式。
+**当前版本支持文本、图片与文件互传。** 不兼容原版 SyncClipboard 协议，也不提供明文传输模式。
+
+> 0.5.4：WebDAV 图片与文件采用单个加密对象上传、加密清单通知和定期拉取。默认附件每 3 秒检查、文本每 2 秒检查，两端可设置 1～300 秒；两端均需更新。Windows 设置支持图片自动发送开关和手动上传剪贴板快捷键。具体网盘兼容性仍需实测。
 
 ## 功能
 
@@ -37,7 +38,7 @@ ClipBridge 通过 WebDAV 或 Docker 中转连接 Windows 客户端与 Android LS
 
 Android 的安装下限不代表所有系统均已验证。剪贴板 Hook 依赖系统与框架实现，兼容性需要在目标设备确认。模块本身不请求 root、不调用 `su`；安装和运行 Hook 框架所需条件由所选框架决定。
 
-预览版 Windows 安装包尚未代码签名，Android APK 使用开发签名。请仅从本仓库下载并核对 Release 中的 SHA-256 校验文件。
+Windows 安装包尚未代码签名，Android APK 延续此前签名以兼容覆盖升级（发布变体不启用调试）。请仅从本仓库下载并核对 Release 中的 SHA-256 校验文件。
 
 ## 使用 WebDAV（无需专用中转）
 
@@ -45,7 +46,7 @@ Android 的安装下限不代表所有系统均已验证。剪贴板 Hook 依赖
 2. Windows 点击“设备 → 添加配对 → WebDAV”，输入目录地址、用户名和密码/应用密码。
 3. 连接成功后使用 Android 扫码，手机确认完成后在电脑点击“手机扫码后完成”。
 
-两端自动在 `clipbridge/<pair-id>/` 下读写加密文件，约两秒轮询；不需要部署 ClipBridge 服务端。当前只支持 Basic 认证，不支持 OAuth、Digest 或原版 SyncClipboard 文件格式。
+两端自动在 `clipbridge/<pair-id>/` 下读写加密文件，采用定期轮询；不需要部署 ClipBridge 服务端。当前只支持 Basic 认证，不支持 OAuth、Digest 或原版 SyncClipboard 文件格式。
 
 **WebDAV 二维码包含账号凭据和内容密钥，无自动过期或一次性领取限制，请勿分享。** 凭据和密钥不以明文上传 WebDAV；它们在客户端配置中由 DPAPI/Keystore 保护。推荐专用目录和权限受限的应用密码。详见 [WebDAV 指南](docs/WEBDAV.md)。
 

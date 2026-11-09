@@ -37,7 +37,7 @@ CasaOS 是可选的容器管理方式，不是运行依赖。
 先从仓库根目录构建本地镜像：
 
 ```sh
-docker build -t clipbridge-relay:0.5.0 -f deploy/Dockerfile .
+docker build -t clipbridge-relay:0.5.4 -f deploy/Dockerfile .
 ```
 
 在面板的自定义安装中导入 `deploy/compose.casaos.yaml`。模板使用上述本地镜像与命名数据卷，不包含特定服务器地址或磁盘路径。按实际环境配置 HTTPS 反代，配对管理码从服务器日志中获取。升级前先构建新镜像，再修改现有应用的镜像标签，避免重复安装两份服务。

@@ -44,16 +44,16 @@ public sealed class TransferHub
     private readonly Func<List<BridgeProfile>> profiles;
     private readonly AttachmentState state;
     private readonly string cache,identity;
-    private readonly Action save;
+    private readonly Action save;private readonly Func<long> clock;private readonly Func<int> attachmentInterval;private int lastInterval;
     private readonly Dictionary<string,AttachmentClient> clients=[];
     private readonly Dictionary<string,AttachmentIndex> remote=[];
-    private readonly Dictionary<string,long> published=[];
+    private readonly Dictionary<string,long> published=[];private readonly Dictionary<string,long> nextPoll=[],nextWrite=[],nextTransfer=[];
     private readonly SemaphoreSlim gate=new(1,1);
     private bool restored;private readonly HashSet<string> errors=[];
     public Action<IncomingAttachment>? Requested{get;set;}
     public Func<IncomingAttachment,Task>? Received{get;set;}
     public Action<string>? Notice{get;set;}
-    public TransferHub(Func<List<BridgeProfile>> profiles,AttachmentState state,string cache,string identity,Action save){this.profiles=profiles;this.state=state;this.cache=cache;this.identity=identity;this.save=save;Directory.CreateDirectory(cache);}
+    public TransferHub(Func<List<BridgeProfile>> profiles,AttachmentState state,string cache,string identity,Action save,Func<long>? clock=null,Func<int>? attachmentInterval=null){this.attachmentInterval=attachmentInterval??(()=>3);this.clock=clock??(()=>DateTimeOffset.UtcNow.ToUnixTimeSeconds());this.profiles=profiles;this.state=state;this.cache=cache;this.identity=identity;this.save=save;Directory.CreateDirectory(cache);}
     public async Task Stage(string source,string kind,List<string> pairs,CancellationToken ct){
         if(new FileInfo(source).Length>Attachments.MaxSize)throw new ArgumentException("单文件上限 100 MB，请改用网盘或其他大文件传输方式。");
         if(Directory.EnumerateFiles(cache).Sum(f=>new FileInfo(f).Length)+new FileInfo(source).Length>512L*1024*1024)throw new ArgumentException("附件暂存已接近 512 MB，请先完成或取消现有传输。");
@@ -64,7 +64,7 @@ public sealed class TransferHub
                 var buffer=new byte[Attachments.ChunkSize];int n;while((n=await input.ReadAsync(buffer,ct))>0){size+=n;if(size>Attachments.MaxSize)throw new ArgumentException("文件超过 100 MB，请使用其他传输方式。");hash.AppendData(buffer,0,n);await output.WriteAsync(buffer.AsMemory(0,n),ct);}await output.FlushAsync(ct);
             }
             var offer=new AttachmentOffer(id,Attachments.SafeName(System.IO.Path.GetFileName(source)),kind=="image"?"image/png":"application/octet-stream",kind,size,Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant(),(int)Math.Max(1,(size+Attachments.ChunkSize-1)/Attachments.ChunkSize),DateTimeOffset.UtcNow.ToUnixTimeSeconds()+3600,"offered",identity);Attachments.Validate(offer);
-            await gate.WaitAsync(ct);try{if(state.Outgoing.Count(j=>j.Phase is not("done" or "rejected" or "cancelled"))>=20)throw new ArgumentException("待发送任务过多，请先完成或取消现有传输。");state.Outgoing.Add(new(){Offer=offer,Path=path,Pairs=pairs,Target=profiles().FirstOrDefault(p=>pairs.Contains(p.Config.Pair))?.Group??""});save();published.Clear();Notice?.Invoke(kind=="file"?"文件请求已排队，等待对方同意":"图片已加入发送队列");}finally{gate.Release();}
+            await gate.WaitAsync(ct);try{if(state.Outgoing.Count(j=>j.Phase is not("done" or "rejected" or "cancelled"))>=20)throw new ArgumentException("待发送任务过多，请先完成或取消现有传输。");state.Outgoing.Add(new(){Offer=offer,Path=path,Pairs=pairs,Target=profiles().FirstOrDefault(p=>pairs.Contains(p.Config.Pair))?.Group??""});save();published.Clear();}finally{gate.Release();}
         }catch{if(File.Exists(path))File.Delete(path);throw;}
     }
     public async Task Decide(string id,bool accept){await gate.WaitAsync();try{var item=state.Incoming.FirstOrDefault(x=>x.Offer.Id==id);if(item is null)return;if(item.Offer.Expires<=DateTimeOffset.UtcNow.ToUnixTimeSeconds()){accept=false;Notice?.Invoke("文件请求已过期，请让对方重新发送。");}item.Phase=accept?"accepted":"rejected";save();published.Clear();}finally{gate.Release();}}
@@ -75,18 +75,18 @@ public sealed class TransferHub
     public async Task Tick(CancellationToken ct){
         await gate.WaitAsync(ct);var callbacks=new List<IncomingAttachment>();var completed=new List<IncomingAttachment>();try{
             if(!restored){callbacks.AddRange(state.Incoming.Where(i=>i.Phase=="waiting"));completed.AddRange(state.Incoming.Where(i=>i.Phase=="preview" && File.Exists(i.Path)));restored=true;}
-            long now=DateTimeOffset.UtcNow.ToUnixTimeSeconds();foreach(var expired in state.Incoming.Where(i=>i.Offer.Expires<=now && i.Phase is "waiting" or "accepted")){expired.Phase="rejected";if(File.Exists(expired.Path))File.Delete(expired.Path);published.Clear();}
+            int interval=Math.Clamp(attachmentInterval(),1,300);if(interval!=lastInterval){nextPoll.Clear();lastInterval=interval;}long now=clock();foreach(var expired in state.Incoming.Where(i=>i.Offer.Expires<=now && i.Phase is "waiting" or "accepted")){expired.Phase="rejected";if(File.Exists(expired.Path))File.Delete(expired.Path);published.Clear();}
             var active=profiles().Where(x=>x.Enabled).ToList();
             foreach(var p in active){if(!p.Enabled)continue;string pair=p.Config.Pair;try{
                 if(!clients.TryGetValue(pair,out var client))clients[pair]=client=new AttachmentClient(p.Config);
-                var index=await client.GetIndex(ct);if(!p.Enabled)continue;errors.Remove(pair);if(index is not null){remote[pair]=index;
+                if(now<nextPoll.GetValueOrDefault(pair))continue;nextPoll[pair]=now+interval;var index=await client.GetIndex(ct);if(!p.Enabled)continue;errors.Remove(pair);if(index is not null){remote[pair]=index;
                     foreach(var offer in index.Offers.Where(o=>o.Expires>now)){if(p.PeerIdentity.Length==32&&offer.Sender!=p.PeerIdentity)continue;
                         var item=state.Incoming.FirstOrDefault(i=>i.Offer.Id==offer.Id && i.Offer.Sender==offer.Sender);
                         if(item is null){if(state.Incoming.Count(i=>i.Phase is not("done" or "rejected"))>=32)continue;item=new(){Offer=offer,Phase=offer.Kind=="image"?"accepted":"waiting"};state.Incoming.Add(item);callbacks.Add(item);}
                         if(!item.Pairs.Contains(pair))item.Pairs.Add(pair);if(offer.Status=="cancelled" && item.Phase is not("done" or "rejected")){item.Phase="rejected";published.Clear();}
                     }
                 }
-            }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{remote.Remove(pair);p.Status="附件通道不可用（专用中转需更新）";if(errors.Add(pair))Notice?.Invoke("附件通道连接失败；若使用专用中转，请更新服务端到 0.5.0。");}}
+            }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{remote.Remove(pair);nextPoll[pair]=now+(p.Config.Transport=="webdav"?300:10);p.Status=p.Config.Transport=="webdav"?"WebDAV 暂不可用，5 分钟后重试":"附件通道不可用";if(errors.Add(pair))Notice?.Invoke(p.Config.Transport=="webdav"?"WebDAV 附件连接失败，请检查权限或服务商限频；稍后重试。":"附件通道连接失败，请检查或更新专用中转。");}}
             foreach(var job in state.Outgoing.Where(j=>j.Phase is not("done" or "rejected" or "cancelled")).ToList()){
                 if(job.Offer.Expires<=now){job.Phase="cancelled";job.Offer=job.Offer with{Status="cancelled"};published.Clear();continue;}
                 var original=profiles().FirstOrDefault(p=>job.Pairs.Contains(p.Config.Pair));if(job.Target.Length==0 || original is not null && job.Target==original.Config.Pair && original.PeerIdentity.Length==32)job.Target=original?.Group??job.Target;
@@ -96,38 +96,40 @@ public sealed class TransferHub
                 if(decisions.Any(d=>d.Status=="done")){job.Phase="done";if(File.Exists(job.Path))File.Delete(job.Path);Notice?.Invoke("对方已接收："+job.Offer.Name);continue;}
                 if(decisions.Any(d=>d.Status=="rejected")){job.Phase="rejected";if(File.Exists(job.Path))File.Delete(job.Path);Notice?.Invoke("对方已拒绝："+job.Offer.Name);continue;}
                 bool accepted=job.Offer.Kind=="image" || decisions.Any(d=>d.Status=="accepted");
-                if(!accepted){if(job.OfferedAt==0)job.OfferedAt=now;else if(now-job.OfferedAt>=15){job.Route=(job.Route+1)%routes.Count;job.OfferedAt=now;published.Clear();}continue;}
-                var route=routes[job.Route%routes.Count];string pair=route.Config.Pair;
+                if(!accepted){if(job.OfferedAt==0)job.OfferedAt=now;else if(routes.Count>1&&now-job.OfferedAt>=(routes[job.Route%routes.Count].Config.Transport=="webdav"?120:15)){job.Route=(job.Route+1)%routes.Count;job.OfferedAt=now;published.Clear();}continue;}
+                var route=routes[job.Route%routes.Count];string pair=route.Config.Pair;if(now<nextTransfer.GetValueOrDefault(pair))continue;
                 try{var client=clients[pair];int part=job.Uploaded.GetValueOrDefault(pair);using var file=File.OpenRead(job.Path);file.Position=(long)part*Attachments.ChunkSize;
-                    for(int batch=0;batch<32 && part<job.Offer.Chunks && route.Enabled && job.Phase!="cancelled";batch++,part++){
+                    if(route.Config.Transport=="webdav"&&part<job.Offer.Chunks){await client.PutBundle(job.Path,job.Offer,ct);job.Uploaded[pair]=job.Offer.Chunks;}
+                    else for(int batch=0;batch<32 && part<job.Offer.Chunks && route.Enabled && job.Phase!="cancelled";batch++,part++){
                         int length=(int)Math.Min(Attachments.ChunkSize,job.Offer.Size-file.Position);byte[] plain=new byte[length];await file.ReadExactlyAsync(plain,ct);await client.PutChunk(job.Offer.Id,part,plain,ct);job.Uploaded[pair]=part+1;
                         route.Status=$"发送 {job.Offer.Name} · {(part+1)*100/job.Offer.Chunks}%";
                     }
                     if(job.Phase!="cancelled" && job.Offer.Status!="ready" && job.Uploaded.GetValueOrDefault(pair)==job.Offer.Chunks){job.Offer=job.Offer with{Status="ready"};job.Phase="ready";route.LastSync=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();published.Clear();}
-                }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{job.Route=(job.Route+1)%routes.Count;job.Offer=job.Offer with{Status="offered"};published.Clear();}
+                }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{nextTransfer[pair]=now+(route.Config.Transport=="webdav"?300:10);job.Route=(job.Route+1)%routes.Count;job.Offer=job.Offer with{Status="offered"};published.Clear();}
             }
             foreach(var item in state.Incoming.Where(i=>i.Phase=="accepted" && i.Offer.Expires>now).ToList()){
-                foreach(var p in active.Where(p=>item.Pairs.Contains(p.Config.Pair))){if(!remote.TryGetValue(p.Config.Pair,out var index)||!index.Offers.Any(o=>o.Id==item.Offer.Id && o.Status=="ready"))continue;
+                foreach(var p in active.Where(p=>item.Pairs.Contains(p.Config.Pair))){if(now<nextTransfer.GetValueOrDefault(p.Config.Pair))continue;if(!remote.TryGetValue(p.Config.Pair,out var index)||!index.Offers.Any(o=>o.Id==item.Offer.Id && o.Status=="ready"))continue;
                     try{
                         if(item.Downloaded==0 && Directory.EnumerateFiles(cache).Sum(f=>new FileInfo(f).Length)+item.Offer.Size>512L*1024*1024)continue;
                         string path=System.IO.Path.Combine(cache,item.Offer.Sender+"-"+item.Offer.Id+".receive");
                         // A failed route starts this local temporary file again, never appending unverified data.
                         if(item.Path!=path){item.Path=path;item.Downloaded=0;}using(var file=new FileStream(path,item.Downloaded==0?FileMode.Create:FileMode.OpenOrCreate,FileAccess.Write,FileShare.None,Attachments.ChunkSize,true)){
                             file.Position=(long)item.Downloaded*Attachments.ChunkSize;
-                            for(int batch=0;batch<32 && item.Downloaded<item.Offer.Chunks && p.Enabled;batch++){
+                            if(p.Config.Transport=="webdav"){file.Close();await clients[p.Config.Pair].GetBundle(item.Offer,path,ct);item.Downloaded=item.Offer.Chunks;}
+                            else for(int batch=0;batch<32 && item.Downloaded<item.Offer.Chunks && p.Enabled;batch++){
                                 byte[] data=await clients[p.Config.Pair].GetChunk(item.Offer.Id,item.Downloaded,ct);int expected=(int)Math.Min(Attachments.ChunkSize,item.Offer.Size-(long)item.Downloaded*Attachments.ChunkSize);if(data.Length!=expected)throw new CryptographicException();await file.WriteAsync(data,ct);item.Downloaded++;p.Status=$"接收 {item.Offer.Name} · {item.Downloaded*100/item.Offer.Chunks}%";
-                            }await file.FlushAsync(ct);
+                            }if(p.Config.Transport!="webdav")await file.FlushAsync(ct);
                         }
                         if(p.Enabled && item.Phase=="accepted" && item.Downloaded==item.Offer.Chunks){using var input=File.OpenRead(path);if(input.Length!=item.Offer.Size || Convert.ToHexString(await SHA256.HashDataAsync(input,ct)).ToLowerInvariant()!=item.Offer.Hash)throw new CryptographicException();item.Phase="preview";item.SourcePair=p.Config.Pair;completed.Add(item);}
                         break;
-                    }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{item.Downloaded=0;if(File.Exists(item.Path))File.Delete(item.Path);}
+                    }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{nextTransfer[p.Config.Pair]=now+(p.Config.Transport=="webdav"?300:10);item.Downloaded=0;if(File.Exists(item.Path))File.Delete(item.Path);}
                 }
             }
-            foreach(var p in active){if(!p.Enabled)continue;string pair=p.Config.Pair;if(!clients.TryGetValue(pair,out var client))continue;if(published.GetValueOrDefault(pair)>now-30)continue;
+            foreach(var p in active){if(!p.Enabled)continue;string pair=p.Config.Pair;if(!clients.TryGetValue(pair,out var client))continue;if(now<nextWrite.GetValueOrDefault(pair)||published.GetValueOrDefault(pair)>now-(p.Config.Transport=="webdav"?900:30))continue;
                 try{var offers=state.Outgoing.Where(j=>j.Pairs.Contains(pair)&&j.Offer.Expires>now&&j.Phase is not("done" or "rejected")).OrderBy(j=>j.Phase=="cancelled"?1:0).Take(32).Select(j=>j.Offer.Status=="ready" && j.Uploaded.GetValueOrDefault(pair)<j.Offer.Chunks?j.Offer with{Status="offered"}:j.Offer).ToList();
                     var receipts=state.Incoming.Where(i=>i.Pairs.Contains(pair)&&i.Offer.Expires>now&&i.Phase!="waiting").TakeLast(128).Select(i=>new AttachmentDecision(i.Offer.Id,i.Phase is "done" or "rejected"?i.Phase:"accepted")).ToList();
                     await client.PutIndex(new(offers,receipts),ct);published[pair]=now;
-                }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{}
+                }catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}catch{nextWrite[pair]=now+(p.Config.Transport=="webdav"?300:10);p.Status="附件通知上传失败，稍后重试";}
             }
             foreach(var job in state.Outgoing.Where(j=>j.Phase is "done" or "rejected" or "cancelled")){
                 foreach(var route in job.Uploaded.Keys.ToArray()){if(!clients.TryGetValue(route,out var client)||!active.Any(p=>p.Enabled&&p.Config.Pair==route))continue;int cleaned=job.Cleaned.GetValueOrDefault(route);try{for(int batch=0;batch<32&&cleaned<job.Uploaded[route];batch++,cleaned++){await client.DeleteChunk(job.Offer.Id,cleaned,ct);job.Cleaned[route]=cleaned+1;}}catch(OperationCanceledException)when(ct.IsCancellationRequested){throw;}catch{}}

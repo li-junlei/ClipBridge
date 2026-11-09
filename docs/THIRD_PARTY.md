@@ -11,3 +11,6 @@ OkHttp 4.12.0 and Okio: Apache-2.0, https://github.com/square/okhttp and https:/
 Kotlin standard library: Apache-2.0, https://github.com/JetBrains/kotlin
 
 SyncClipboard Xposed was consulted as a visual reference; no project source files were copied.
+
+Microsoft.Toolkit.Uwp.Notifications 7.1.3: MIT, https://github.com/CommunityToolkit/WindowsCommunityToolkit
+License included in LICENSE-TOAST-TOOLKIT.md.

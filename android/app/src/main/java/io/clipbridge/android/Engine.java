@@ -19,7 +19,7 @@ final class Engine {
     private final AtomicReference<JSONObject> remote=new AtomicReference<>();
     private final AtomicLong generation=new AtomicLong();
     private volatile JSONObject config;
-    private volatile boolean paused=true;
+    private final Object pollWake=new Object();private volatile boolean paused=true;private volatile int pollSeconds=2;
     private volatile String lastObserved;
     private JSONObject state;
     private long nextLoad=0,nextSend=0,nextIdentity=0;
@@ -30,7 +30,7 @@ final class Engine {
     Engine(Context c,String pair){this.pair=pair;context=c;clipboard=(ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);}
     boolean ready(){return running&&config!=null&&!paused;}
     void queue(String text,String event){local.set(new LocalClip(text,event));generation.incrementAndGet();}
-    void stop(){running=false;paused=true;worker.shutdownNow();if(listener!=null)main.post(()->clipboard.removePrimaryClipChangedListener(listener));config=null;}
+    void stop(){running=false;synchronized(pollWake){pollWake.notifyAll();}paused=true;worker.shutdownNow();if(listener!=null)main.post(()->clipboard.removePrimaryClipChangedListener(listener));config=null;}
     void start(){
         if(!running)return;
         listener=()->{
@@ -63,7 +63,7 @@ final class Engine {
             try {
                 Bundle b=context.getContentResolver().call(BridgeProvider.URI,"load",pair,null);
 
-                paused=b.getBoolean("paused");installation=b.getString("installation","");
+                int newPoll=Math.max(1,Math.min(300,b.getInt("textPollSeconds",2)));if(newPoll!=pollSeconds){synchronized(pollWake){pollSeconds=newPoll;pollWake.notifyAll();}}paused=b.getBoolean("paused");installation=b.getString("installation","");
                 if(!b.containsKey("config")){paused=true;config=null;state=null;local.set(null);remote.set(null);generation.incrementAndGet();lastObserved=null;return;}
                 if(b.containsKey("config") && (config==null || !config.toString().equals(b.getString("config")))){
                     JSONObject c=new JSONObject(b.getString("config"));Protocol.config(c);
@@ -76,7 +76,7 @@ final class Engine {
             } catch(Exception e){paused=true;status("配置暂不可用；解锁后自动重试");return;}
         }
         JSONObject c=config;if(c==null || paused) return;
-        if(now>=nextIdentity){nextIdentity=now+15000;try{
+        if(now>=nextIdentity){nextIdentity=now+("webdav".equals(c.optString("transport"))?300000:15000);try{
             JSONObject nameChannel=identityConfig(c);
             request(c,"POST","v1/device-info",Protocol.seal(nameChannel,System.currentTimeMillis(),new JSONObject().put("name",deviceName()).put("installation",installation).toString()).toString());
             String data=request(c,"GET","v1/device-info",null);
@@ -144,7 +144,7 @@ final class Engine {
                 }
                 failures=0;
             }catch(Throwable e){failures=Math.min(failures+1,6);status("接收连接异常或消息被拒绝");}
-            try{Thread.sleep(failures==0 && config!=null && "webdav".equals(config.optString("transport"))?2000:Math.min(60000,(1L<<failures)*1000));}catch(InterruptedException e){return;}
+            try{synchronized(pollWake){if(running)pollWake.wait(failures==0 && config!=null && "webdav".equals(config.optString("transport"))?pollSeconds*1000L:Math.min(60000,(1L<<failures)*1000));}}catch(InterruptedException e){return;}
         }
     }
     private Bundle identityBundle(){Bundle b=new Bundle();b.putString("pair",pair);return b;}

@@ -2,9 +2,11 @@ plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.plugin.compose'
 android {
     namespace 'io.clipbridge.android'
     compileSdk { version = release(37) }
-    defaultConfig { testInstrumentationRunner 'io.clipbridge.android.MediaSmokeRunner'; applicationId 'io.clipbridge.android'; minSdk 29; targetSdk 36; versionCode 6; versionName '0.5.0' }
+    defaultConfig { testInstrumentationRunner 'io.clipbridge.android.MediaSmokeRunner'; applicationId 'io.clipbridge.android'; minSdk 29; targetSdk 36; versionCode 10; versionName '0.5.4' }
     compileOptions { coreLibraryDesugaringEnabled true; sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildFeatures { compose true; buildConfig true }
+    // Preserve upgrade compatibility with the previously distributed signing key.
+    buildTypes { release { signingConfig signingConfigs.debug } }
 }
 kotlin { compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17 } }
 dependencies {

@@ -39,12 +39,16 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb"
 Source: "..\docs\THIRD_PARTY.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\docs\LICENSE-QRCODER.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\docs\LICENSE-TOAST-TOOLKIT.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\licenses"; Flags: ignoreversion
 [Icons]
 Name: "{userprograms}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"
 Name: "{userdesktop}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\ClipBridge.Windows.exe"; Description: "启动 ClipBridge"; Flags: nowait postinstall skipifsilent
+[UninstallRun]
+Filename: "{app}\ClipBridge.Windows.exe"; Parameters: "--unregister-notifications"; Flags: runhidden waituntilterminated
+
 [Code]
 const RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -64,5 +68,8 @@ begin
   if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\*\shell\ClipBridge\command', '', Value) then
     if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --send "%1"') = 0 then
       RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\*\shell\ClipBridge');
+  if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\clipbridge-desktop\shell\open\command', '', Value) then
+    if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --notification "%1"') = 0 then
+      RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\clipbridge-desktop');
   { Pairing data in LocalAppData\ClipBridge is deliberately preserved. }
 end;

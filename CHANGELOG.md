@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.4 — 2026-11-10
+
+- Support WebDAV images and files through one streaming encrypted object, encrypted consent/ready manifests and receiver-side integrity validation.
+- Default text polling to 2 seconds and attachment checks to 3 seconds; add saved 1–300 second settings on both clients.
+- Fix Windows status-refresh flicker and clipped text; add rounded components, capsule switches and modern file dialogs.
+- Use the Android Miuix theme for file sharing and consolidate transfer notifications.
+- Add a Windows image auto-send switch and configurable global shortcut for uploading the current clipboard.
+- Reduce Windows tray to send files, pause/resume and exit.
+- Add Android status-notification channel control while preserving actionable transfer notifications.
+- Open saved Android attachments from completion notifications; add Windows native open-file and show-in-folder buttons with locally authenticated links.
+- Preserve existing pairing and local settings during upgrade. Internal 0.5.1–0.5.3 test builds were not published.
+
 ## 0.5.0 — Media and multiple configurations preview
 
 - Add independent configuration switches and encrypted installation identities for target grouping.

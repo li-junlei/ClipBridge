@@ -53,3 +53,9 @@ POST /v1/device-info 和 GET /v1/device-info 使用现有设备认证和独立�
 分块 AAD 为 ASCII `clipbridge:attachment:1:{pair}:{from}:{to}:{transfer-id}:{part}`，分块密钥为 `HMAC-SHA256(root, AAD)`。二进制布局是 12 字节随机 nonce、密文、16 字节 GCM tag。分块最多 256 KiB，索引 0–399，单文件最多 100 MiB，完整文件 SHA-256 在加密清单内传输。接收端在所有块认证和完整摘要验证后才保存文件。
 
 专用中转通过 `attachments: 1` 声明能力。对象接口为 `/v1/objects/{device}/{index|transfer-id-part}`，PUT/DELETE 只允许本人设备，GET 只允许配对内设备。服务端只校验密文外层和大小，不持有内容密钥。每设备 512 MiB / 8192 对象配额，24 小时过期，后续写入触发清理。
+
+## v0.5.3 WebDAV 单对象附件
+
+WebDAV 采用 `attachments/<sender-id>/<transfer-id>.cbx` 单对象，依次拼接原 256 KiB 加密块，每块仍为 nonce(12) / ciphertext / tag(16)，AAD 与独立分块相同。加密清单提供总明文大小、块数和 SHA-256，总对象长度必须为 size + 28 * chunks。接收端拒绝截断、额外尾部数据、认证失败及摘要不符。HTTP 固定 Content-Length，传输逐块处理；断线后重传整个对象。专用中转继续使用原有分块接口。
+
+WebDAV 清单按约 60 秒读取、状态变化立即写入、空闲约 15 分钟刷新；错误退避约 5 分钟。文件只有接受请求后才上传，ready 只能在 PUT 成功后发布。客户端均需升级。

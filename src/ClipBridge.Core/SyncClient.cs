@@ -40,10 +40,10 @@ public sealed class SyncState
 public sealed class RelayClient : IDisposable
 {
     private readonly HttpClient http;
-    private readonly WebDavTransport? webdav;
-    public RelayClient(ClientConfig c)
+    private readonly WebDavTransport? webdav;private readonly Func<int> pollInterval;
+    public RelayClient(ClientConfig c,Func<int>? pollInterval=null)
     {
-        c.Validate();
+        this.pollInterval=pollInterval??(()=>2);c.Validate();
         http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
             { BaseAddress = new Uri(c.Server.TrimEnd('/')+"/"), Timeout = TimeSpan.FromSeconds(35), MaxResponseContentBufferSize = 600000 };
         http.DefaultRequestHeaders.CacheControl = new CacheControlHeaderValue { NoCache=true,NoStore=true };
@@ -58,7 +58,7 @@ public sealed class RelayClient : IDisposable
     }
     public async Task<Envelope?> Receive(string after, CancellationToken ct)
     {
-        if(webdav is not null){var e=await webdav.Get(false,ct);if(e is null || e.Id==after){await Task.Delay(1000,ct);return null;}return e;}
+        if(webdav is not null){var e=await webdav.Get(false,ct);if(e is null || e.Id==after){await Task.Delay(Math.Clamp(pollInterval(),1,300)*1000,ct);return null;}return e;}
         using var response = await http.GetAsync("v1/inbox?after=" + Uri.EscapeDataString(after), ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<Envelope?>(Wire.Json, ct);

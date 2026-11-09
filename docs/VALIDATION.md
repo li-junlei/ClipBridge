@@ -35,3 +35,9 @@
 复现：`python tests/attachment_flow.py`、`python tests/relay_attachment_flow.py`；前者需要 JAVA_HOME 和 tests/requirements.txt。Android 专项需先构建 assembleDebugAndroidTest，在独立空配置模拟器安装两个 APK 并授予通知权限，然后执行 `adb -s <专用模拟器序列号> shell am instrument -w io.clipbridge.android.test/io.clipbridge.android.MediaSmokeRunner`。不要在日常手机运行专项测试。
 
 模拟器不包含 LSPosed；真实 HyperOS / Vector Hook、锁屏后台、长时间网络切换、Windows 原生通知交互和具体 WebDAV 服务商仍需实机验证。此检查不构成独立安全审计。
+
+## v0.5.4 发布检查
+
+Windows 状态控件保留、窗口尺寸、放大字体、胶囊开关、图片自动发送提示、轮询设置、三项托盘及完成通知双按钮内容检查通过。Android 独立模拟器通过 20 项分享、配置、通知、相册与设置入口检查；WebDAV 单对象往返、Android/.NET 互解、接收方同意和低频空闲请求检查通过。
+
+发布 APK 使用 release 变体并延续此前签名以兼容升级，不开启调试。Windows 安装程序自带运行环境。正式发布渠道不代表独立安全审计或所有 WebDAV 服务商、系统通知与 OEM 后台行为均完成实机验证。

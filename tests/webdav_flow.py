@@ -2,11 +2,12 @@
 from pathlib import Path
 import base64,http.server,threading,subprocess,tempfile,json,os,shutil
 root=Path(__file__).resolve().parents[1]
-files={};collections={'/dav/base/'};trap=[];seen=[];lock=threading.Lock()
+requests=[];files={};collections={'/dav/base/'};trap=[];seen=[];lock=threading.Lock()
 auth='Basic '+base64.b64encode(b'dav-user:test-only-password').decode()
 class Handler(http.server.BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def handle_request(self):
+  requests.append((self.command,self.path))
   if self.path.startswith('/trap'):trap.append(1)
   if self.headers.get('Authorization')!=auth:self.send_response(401);self.end_headers();return
   if self.path.startswith('/dav/redirect/'):
