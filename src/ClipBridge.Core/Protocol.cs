@@ -7,13 +7,18 @@ namespace ClipBridge;
 
 public record ClientConfig(string Server, string Pair, string Device, string Peer, string Token, string Key)
 {
+    public string Transport { get; init; } = "relay";
+    public string Username { get; init; } = "";
+    public string Password { get; init; } = "";
     public void Validate()
     {
+        if(Transport is not ("relay" or "webdav")) throw new ArgumentException("Unknown transport.");
         var uri = new Uri(Server);
         if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback))
             throw new ArgumentException("Only HTTPS or loopback HTTP is permitted.");
-        if (uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 || uri.AbsolutePath != "/")
+        if (uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 || (Transport == "relay" && uri.AbsolutePath != "/"))
             throw new ArgumentException("Server must be an origin URL.");
+        if(Transport=="webdav" && (string.IsNullOrWhiteSpace(Username) || Username.Length>256 || Username.Contains(':') || Username.Any(char.IsControl) || Password.Length is <1 or >1024 || Password.Any(char.IsControl))) throw new ArgumentException("Invalid WebDAV credentials.");
         foreach (var id in new[] { Pair, Device, Peer }) Wire.Id(id);
         if (Device == Peer || Convert.FromBase64String(Key).Length != 32 || Convert.FromBase64String(Token).Length != 32)
             throw new ArgumentException("Invalid pairing configuration.");

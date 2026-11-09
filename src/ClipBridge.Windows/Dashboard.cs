@@ -48,13 +48,19 @@ sealed partial class BridgeWindow
         }else{
             var card=new SoftCard{Size=new Size(width,140),Margin=new Padding(0,0,0,20)};
             var startup=new CheckBox{Text="开机自启动（启动后驻留托盘）",AutoSize=true,Location=new Point(22,25),Checked=AutoStart()};startup.CheckedChanged+=(_,_)=>SetAutoStart(startup.Checked);card.Controls.Add(startup);
-            var version=MakeLabel("版本  0.3.1",10);version.Location=new Point(22,88);version.ForeColor=Color.Gray;card.Controls.Add(version);stack.Controls.Add(card);
+            var version=MakeLabel("版本  0.4.0",10);version.Location=new Point(22,88);version.ForeColor=Color.Gray;card.Controls.Add(version);stack.Controls.Add(card);
         }
         page.Controls.Add(stack);page.ResumeLayout();
     }
     private void AddPairing()
     {
-        using var wizard=new PairingWizard(config?.Server,folder,config is not null);
+        using var choice=new Form{Text="添加配对",ClientSize=new Size(350,180),FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,StartPosition=FormStartPosition.CenterParent};
+        var relayChoice=MakeButton("ClipBridge 中转",true);relayChoice.SetBounds(25,30,300,45);relayChoice.Click+=(_,_)=>{choice.DialogResult=DialogResult.Yes;};choice.Controls.Add(relayChoice);
+        var davChoice=MakeButton("WebDAV",false);davChoice.SetBounds(25,100,300,45);davChoice.Click+=(_,_)=>{choice.DialogResult=DialogResult.No;};choice.Controls.Add(davChoice);
+        var result=choice.ShowDialog(this);
+        if(result==DialogResult.No){using var dav=new WebDavWizard();if(dav.ShowDialog(this)==DialogResult.OK && dav.SelectedConfig is {} selectedDav){try{UsePairing(selectedDav);File.Delete(Path.Combine(folder,"pending-pairing.bin"));}catch{MessageBox.Show(this,"本地配置保存失败。","ClipBridge");}}return;}
+        if(result!=DialogResult.Yes)return;
+        using var wizard=new PairingWizard(config?.Transport=="relay"?config.Server:null,folder,config is not null);
         if(wizard.ShowDialog(this)==DialogResult.OK && wizard.SelectedConfig is {} selected){try{UsePairing(selected);File.Delete(Path.Combine(folder,"pending-pairing.bin"));}catch{MessageBox.Show(this,"本地保存失败，请检查磁盘权限。","ClipBridge");}}
     }
     internal static Label MakeLabel(string text,float size,FontStyle style=FontStyle.Regular)=>new(){Text=text,AutoSize=true,Font=new Font("Microsoft YaHei UI",size,style),ForeColor=Color.FromArgb(35,39,43),BackColor=Color.Transparent};

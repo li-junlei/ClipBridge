@@ -14,8 +14,10 @@ final class Protocol {
     static void id(String s) { if (!s.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid ID"); }
     static void config(JSONObject c) throws Exception {
         for (String k : new String[]{"pair","device","peer"}) id(c.getString(k));
+        String transport=c.optString("transport","relay");if(!transport.equals("relay") && !transport.equals("webdav"))throw new IllegalArgumentException("Unknown transport");
+        if(transport.equals("webdav")){String user=c.getString("username"),password=c.getString("password");if(user.isBlank() || user.length()>256 || user.contains(":") || user.matches(".*[\\p{Cntrl}].*") || password.isEmpty() || password.length()>1024 || password.matches(".*[\\p{Cntrl}].*"))throw new IllegalArgumentException("Invalid WebDAV credentials");}
         URI uri = new URI(c.getString("server"));
-        if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo()!=null || uri.getQuery()!=null || uri.getFragment()!=null || !(uri.getPath().isEmpty() || uri.getPath().equals("/"))) throw new IllegalArgumentException("HTTPS origin required");
+        if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo()!=null || uri.getQuery()!=null || uri.getFragment()!=null || (transport.equals("relay") && !(uri.getPath().isEmpty() || uri.getPath().equals("/")))) throw new IllegalArgumentException("HTTPS origin required");
         if (c.getString("device").equals(c.getString("peer")) || decode(c.getString("key")).length!=32 || decode(c.getString("token")).length!=32) throw new IllegalArgumentException("Invalid configuration");
     }
     static void state(JSONObject c,JSONObject s) throws Exception {
@@ -42,6 +44,7 @@ final class Protocol {
         e.put("data",encode(Crypto.transform(Cipher.ENCRYPT_MODE,decode(c.getString("key")),nonce,header(e),p.toString().getBytes(StandardCharsets.UTF_8))));
         return e;
     }
+    static final class ExpiredMessage extends SecurityException {}
     static String open(JSONObject c,JSONObject e) throws Exception {
         String h=header(e);
         if(!e.getString("pair").equals(c.getString("pair")) || !e.getString("from").equals(c.getString("peer")) || !e.getString("to").equals(c.getString("device"))) throw new SecurityException("Wrong peer");
@@ -52,7 +55,8 @@ final class Protocol {
             JSONObject p=new JSONObject(new String(plain,StandardCharsets.UTF_8));
             long now=System.currentTimeMillis()/1000, created=p.getLong("created"), expires=p.getLong("expires");
             String text=p.getString("text");
-            if(!p.getString("kind").equals("text") || text.getBytes(StandardCharsets.UTF_8).length>65536 || created>now+60 || expires<=now || expires<created || expires-created>600) throw new SecurityException("Expired or invalid payload");
+            if(!p.getString("kind").equals("text") || text.getBytes(StandardCharsets.UTF_8).length>65536 || created>now+60 || expires<created || expires-created>600) throw new SecurityException("Expired or invalid payload");
+            if(expires<=now)throw new ExpiredMessage();
             return text;
         } finally { java.util.Arrays.fill(plain,(byte)0); }
     }

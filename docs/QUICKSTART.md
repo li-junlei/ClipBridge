@@ -1,6 +1,12 @@
 # 使用指南
 
-## 连接设备
+## WebDAV 连接
+
+无需部署专用中转。Windows 添加配对时选择 WebDAV，填写已有目录的 HTTPS 地址、用户名和密码/应用密码。确认具有 GET、PUT、MKCOL 权限。连接成功后，手机扫码确认，再在电脑完成配对。
+
+WebDAV 二维码直接包含凭据和密钥，不会自动过期；只供自己的手机扫描。WebDAV 目录仅保存密文文件。约两秒轮询，延迟与服务商限流、缓存和网络相关。当前只支持 Basic 认证。详情见 [WebDAV 指南](WEBDAV.md)。
+
+## 专用中转连接
 
 先按 [部署指南](DEPLOYMENT.md) 部署中转并配置 HTTPS，再安装 Release 中的 Windows 安装程序与 Android APK。
 

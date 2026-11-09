@@ -14,6 +14,8 @@ try {
     if ($LASTEXITCODE) { throw 'Protocol checks failed' }
     python tests/integration.py
     if ($LASTEXITCODE) { throw 'Integration checks failed' }
+    python tests/webdav_flow.py
+    if ($LASTEXITCODE) { throw 'WebDAV checks failed' }
     if ($Android) {
         Push-Location android
         try {

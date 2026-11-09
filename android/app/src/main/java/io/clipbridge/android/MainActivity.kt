@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this).setTitle(if(snapshot.paired) "切换设备配对？" else "连接到电脑")
             .setMessage("服务器：$server\n\n"+if(snapshot.paired) "当前配对将切换到此电脑。确认这是你电脑上生成的二维码后继续。" else "确认这是你电脑上生成的二维码，即可安全传递配对信息。")
             .setNegativeButton("取消",null).setPositiveButton("确认配对"){_,_->
-                busy=true;message="正在获取加密邀请…"
+                busy=true;message=if(qr.startsWith("clipbridge://webdav#")) "正在导入 WebDAV 配置…" else "正在获取加密邀请…"
                 io.execute {
                     try {
                         val config=PairingClient.claim(qr)
@@ -149,7 +149,7 @@ private fun BridgeApp(s:UiSnapshot,busy:Boolean,message:String,hidden:Boolean,on
             }
             if(tab==2){
                 Card(Modifier.fillMaxWidth(),cornerRadius=26.dp){ToggleRow("暂停同步",s.paused,onPause);ToggleRow("隐藏桌面图标",hidden,onHide)}
-                Card(Modifier.fillMaxWidth(),cornerRadius=26.dp){InfoRow("版本","0.3.1");InfoRow("设备名称",android.os.Build.MODEL)}
+                Card(Modifier.fillMaxWidth(),cornerRadius=26.dp){InfoRow("版本","0.4.0");InfoRow("设备名称",android.os.Build.MODEL)}
             }
             Spacer(Modifier.height(12.dp))
         }

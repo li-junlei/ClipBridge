@@ -13,7 +13,14 @@ import java.util.Arrays;
 import java.util.Base64;
 
 public final class PairingClient {
+    private static JSONObject webDavConfig(String qr)throws Exception{
+        if(qr==null || qr.length()>2200)throw new IllegalArgumentException("无效二维码");
+        Uri uri=Uri.parse(qr);if(!"clipbridge".equals(uri.getScheme()) || !"webdav".equals(uri.getHost()) || uri.getQuery()!=null)throw new IllegalArgumentException("无效二维码");
+        JSONObject c=new JSONObject(new String(Base64.getUrlDecoder().decode(uri.getFragment()),StandardCharsets.UTF_8));
+        if(!"webdav".equals(c.optString("transport")))throw new IllegalArgumentException();Protocol.config(c);return c;
+    }
     public static String server(String qr) throws Exception {
+        if(qr!=null && qr.startsWith("clipbridge://webdav#"))return webDavConfig(qr).getString("server");
         if(qr==null || qr.length()>2048) throw new IllegalArgumentException("无效的配对二维码");
         Uri u=Uri.parse(qr);
         if(!"clipbridge".equals(u.getScheme()) || !"pair".equals(u.getHost())) throw new IllegalArgumentException("请扫描 ClipBridge 的配对二维码");
@@ -24,6 +31,7 @@ public final class PairingClient {
         return server.replaceAll("/+$", "");
     }
     public static String claim(String qr) throws Exception {
+        if(qr!=null && qr.startsWith("clipbridge://webdav#"))return webDavConfig(qr).toString();
         String server=server(qr);Uri u=Uri.parse(qr);String ticket=u.getQueryParameter("id");
         byte[] key=Base64.getUrlDecoder().decode(u.getFragment());
         HttpsURLConnection connection=(HttpsURLConnection)new URL(server+"/v1/pairing-invites/claim").openConnection();

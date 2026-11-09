@@ -23,8 +23,10 @@ final class Engine {
     private JSONObject state;
     private long nextLoad=0,nextSend=0,nextIdentity=0;
     private int failures=0;
+    private volatile WebDav dav;
     Engine(Context c){context=c;clipboard=(ClipboardManager)c.getSystemService(Context.CLIPBOARD_SERVICE);}
     void start(){
+        Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"ClipBridge-heartbeat");t.setDaemon(true);return t;}).scheduleWithFixedDelay(()->{try{context.getContentResolver().call(BridgeProvider.URI,"heartbeat",null,null);}catch(Throwable ignored){}},0,5,TimeUnit.SECONDS);
         clipboard.addPrimaryClipChangedListener(()->{
             try {
                 if(paused || config==null) return;
@@ -54,13 +56,14 @@ final class Engine {
             nextLoad=now+5000;
             try {
                 Bundle b=context.getContentResolver().call(BridgeProvider.URI,"load",null,null);
-                context.getContentResolver().call(BridgeProvider.URI,"heartbeat",null,null);
+
                 paused=b.getBoolean("paused");
                 if(!b.containsKey("config")){paused=true;config=null;state=null;local.set(null);remote.set(null);generation.incrementAndGet();lastObserved=null;return;}
                 if(b.containsKey("config") && (config==null || !config.toString().equals(b.getString("config")))){
                     JSONObject c=new JSONObject(b.getString("config"));Protocol.config(c);
                     JSONObject saved=new JSONObject(b.getString("state"));Protocol.state(c,saved);
                     local.set(null);remote.set(null);generation.incrementAndGet();
+                    dav="webdav".equals(c.optString("transport"))?new WebDav(c.getString("server"),c.getString("username"),c.getString("password"),c.getString("pair")):null;
                     state=saved;config=c;nextSend=0;nextIdentity=0;lastObserved=null;status("模块已连接，等待剪贴板变化");
                 }
             } catch(Exception e){paused=true;status("配置暂不可用；解锁后自动重试");return;}
@@ -123,12 +126,15 @@ final class Engine {
                     JSONObject e=new JSONObject(response);Protocol.header(e);
                     if(!paused && config==c){
                         // Validate before handing off. Untrusted traffic cannot fill a work queue.
-                        Protocol.open(c,e);remote.set(e);after=e.getString("id");
+                        if(!e.getString("id").equals(after)){
+                            try{Protocol.open(c,e);remote.set(e);}catch(Protocol.ExpiredMessage ignored){}
+                            after=e.getString("id");
+                        }
                     }
                 }
                 failures=0;
             }catch(Throwable e){failures=Math.min(failures+1,6);status("接收连接异常或消息被拒绝");}
-            try{Thread.sleep(Math.min(60000,(1L<<failures)*1000));}catch(InterruptedException e){return;}
+            try{Thread.sleep(failures==0 && config!=null && "webdav".equals(config.optString("transport"))?2000:Math.min(60000,(1L<<failures)*1000));}catch(InterruptedException e){return;}
         }
     }
     private String deviceName(){String name=android.provider.Settings.Global.getString(context.getContentResolver(),"device_name");if(name==null || name.isBlank())name=android.os.Build.MODEL;name=name.replaceAll("[\\p{Cntrl}]","");return name.substring(0,Math.min(80,name.length()));}
@@ -140,6 +146,11 @@ final class Engine {
     private void metrics(JSONObject c,String key,Object value){try{Bundle b=new Bundle();b.putString("pair",c.getString("pair"));b.putString("device",c.getString("device"));if(value instanceof Long)b.putLong(key,(Long)value);else b.putString(key,(String)value);context.getContentResolver().call(BridgeProvider.URI,"metrics",null,b);}catch(Exception ignored){}}
     private String request(JSONObject c,String method,String path,String body) throws Exception {
         if(method.equals("POST") && path.equals("v1/messages") && !isCurrent(c))throw new IllegalStateException("Pairing inactive");
+        if("webdav".equals(c.optString("transport"))){
+            WebDav current=dav;if(current==null || config!=c)throw new IllegalStateException();
+            boolean identity=path.equals("v1/device-info");String device=method.equals("POST")?c.getString("device"):c.getString("peer");String file=device+(identity?".device.json":".clip.json");
+            if(method.equals("POST")){current.put(file,body);return "null";}return current.get(file);
+        }
         String origin=c.getString("server");
         HttpsURLConnection connection=(HttpsURLConnection)new URL(origin.replaceAll("/+$", "")+"/"+path).openConnection();
         connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(30000);

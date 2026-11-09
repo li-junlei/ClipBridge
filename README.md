@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/status-preview-orange" alt="Preview">
 </p>
 
-ClipBridge 将 Windows 客户端、Android LSPosed 模块与 Docker 中转服务连接起来。剪贴板内容在发送端加密，在接收端解密；中转服务负责认证、路由和保存密文。
+ClipBridge 通过 WebDAV 或 Docker 中转连接 Windows 客户端与 Android LSPosed 模块。剪贴板内容在发送端加密，在接收端解密；中转服务负责认证、路由和保存密文。
 
 **当前版本为开发预览，仅同步纯文本。** 不兼容原版 SyncClipboard 协议，也不提供明文传输模式。
 
@@ -20,6 +20,7 @@ ClipBridge 将 Windows 客户端、Android LSPosed 模块与 Docker 中转服务
 - **扫码配对**：电脑填写服务器地址和配对管理码，手机扫描五分钟有效、一次性领取的二维码。
 - **Windows 客户端**：安装程序、托盘、开机自启动、配置删除、设备名称和最后同步时间。
 - **Android 模块**：Miuix 界面、模块状态、配对设备数、最后同步时间、配置删除和可隐藏的桌面入口。
+- **WebDAV 中转**：HTTPS 目录、Basic 认证、加密文件轮询，可直接使用现有 WebDAV 服务。
 - **自托管中转**：Docker Compose、独立设备令牌、请求限流、只读容器根文件系统和持久化数据卷。
 
 ## 下载与要求
@@ -30,13 +31,23 @@ ClipBridge 将 Windows 客户端、Android LSPosed 模块与 Docker 中转服务
 | --- | --- |
 | Windows | Windows 10/11 x64；安装程序自带 .NET 运行环境 |
 | Android | Android 10+ 是安装下限；需要可用的 LSPosed 或兼容框架，APK 同时包含管理界面和模块 |
-| 中转服务 | Docker Compose，自行配置有效 HTTPS 域名与反向代理 |
+| 中转 | 支持 HTTPS/Basic 的 WebDAV，或 Docker Compose 专用中转 |
 
 Android 的安装下限不代表所有系统均已验证。剪贴板 Hook 依赖系统与框架实现，兼容性需要在目标设备确认。模块本身不请求 root、不调用 `su`；安装和运行 Hook 框架所需条件由所选框架决定。
 
 预览版 Windows 安装包尚未代码签名，Android APK 使用开发签名。请仅从本仓库下载并核对 Release 中的 SHA-256 校验文件。
 
-## 快速开始
+## 使用 WebDAV（无需专用中转）
+
+1. 准备一个已存在、支持 HTTPS 与 Basic 认证的 WebDAV 目录，授予读、写、创建子目录权限。
+2. Windows 点击“设备 → 添加配对 → WebDAV”，输入目录地址、用户名和密码/应用密码。
+3. 连接成功后使用 Android 扫码，手机确认完成后在电脑点击“手机扫码后完成”。
+
+两端自动在 `clipbridge/<pair-id>/` 下读写加密文件，约两秒轮询；不需要部署 ClipBridge 服务端。当前只支持 Basic 认证，不支持 OAuth、Digest 或原版 SyncClipboard 文件格式。
+
+**WebDAV 二维码包含账号凭据和内容密钥，无自动过期或一次性领取限制，请勿分享。** 凭据和密钥不以明文上传 WebDAV；它们在客户端配置中由 DPAPI/Keystore 保护。推荐专用目录和权限受限的应用密码。详见 [WebDAV 指南](docs/WEBDAV.md)。
+
+## 使用专用中转
 
 ### 1. 部署中转服务
 

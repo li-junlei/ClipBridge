@@ -21,3 +21,7 @@
 ## v0.3.1 发布检查
 
 核心协议 25 项、HTTP/Java 互操作 16 项、配对专项 13 项检查通过。Windows 安装程序与 Android APK 构建通过；公开源码和客户端发布物已扫描已知私人信息标记，未发现残留。此检查不等同于独立安全审计。
+
+## v0.4.0 WebDAV 检查
+
+`python tests/webdav_flow.py` 验证 .NET 与 Android Java 的实际 WebDAV HTTP 请求、双向密文、设备名、重复过滤、错误认证、禁止重定向、响应大小和离线二维码配置。隔离测试通过；原 25 项核心、16 项 HTTP/互操作和 13 项专用配对检查通过。Windows 安装程序及 Android APK 构建通过。尚未使用实际 WebDAV 服务商账号实测。
