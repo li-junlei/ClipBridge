@@ -1,7 +1,7 @@
 name: clipbridge
 services:
   relay:
-    image: clipbridge-relay:0.5.4
+    image: clipbridge-relay:0.6.3
     pull_policy: never
     restart: unless-stopped
     ports:
@@ -32,5 +32,5 @@ x-casaos:
     zh_cn: 自托管密文中转。导入前先构建本地镜像，并单独配置 HTTPS 反向代理。
   tips:
     before_install:
-      en_us: Build clipbridge-relay:0.5.4 first. Preserve the data volume during upgrades.
-      zh_cn: 请先构建 clipbridge-relay:0.5.4；升级时保留数据卷。
+      en_us: Build clipbridge-relay:0.6.3 first. Preserve the data volume during upgrades.
+      zh_cn: 请先构建 clipbridge-relay:0.6.3；升级时保留数据卷。

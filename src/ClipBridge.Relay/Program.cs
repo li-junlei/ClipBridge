@@ -16,6 +16,7 @@ var registry = new PairingRegistry(config, dataDirectory);
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = 429;
+    o.AddPolicy("group-pairing",context=>RateLimitPartition.GetFixedWindowLimiter("group:"+context.Connection.RemoteIpAddress,_=>new FixedWindowRateLimiterOptions{PermitLimit=300,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     o.AddPolicy("attachments",context=>RateLimitPartition.GetFixedWindowLimiter((string?)context.Items["device"]??"anonymous",_=>new FixedWindowRateLimiterOptions{PermitLimit=6000,Window=TimeSpan.FromMinutes(1),QueueLimit=0}));
     o.AddPolicy("device", context => RateLimitPartition.GetFixedWindowLimiter(
         (string?)context.Items["device"] ?? "public:" + context.Connection.RemoteIpAddress, _ => new FixedWindowRateLimiterOptions
@@ -25,6 +26,7 @@ var store = new InboxStore(dataDirectory);
 var app = builder.Build();
 app.Use(async (context, next) =>
 {
+    if(context.Request.Path.StartsWithSegments("/v2")){await next(context);return;}
     if (context.Request.Path == "/health" || context.Request.Path == "/v1/setup/info" ||
         (context.Request.Path == "/v1/pairing-invites/claim" && context.Request.Method == "POST"))
     { await next(context); return; }
@@ -43,8 +45,9 @@ app.Use(async (context, next) =>
     await next(context);
 });
 app.UseRateLimiter();
+app.MapGroupRoutes(registry.IsSetup,dataDirectory);
 app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1 }));
-app.MapGet("/v1/setup/info", () => Results.Ok(new { pairing = 1, deviceInfo = 1, attachments = 1, requiresSetupCode = true }));
+app.MapGet("/v1/setup/info", () => Results.Ok(new { pairing = 1, deviceInfo = 1, attachments = 1, groups = 1, requiresSetupCode = true }));
 app.MapPost("/v1/pairings", async (HttpContext ctx) =>
 {
     try

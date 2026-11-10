@@ -4,8 +4,32 @@ internal static class Program
 {
     [STAThread] private static void Main(string[] args)
     {
+        if(args.Length>0&&args[0]=="provider-invite"){ProviderInvitation.Run(args[1]);return;}
+        if(args.Length>0&&args[0]=="manual-pair"){ManualPairing.Run(args[1]);return;}
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+        var originType=Assembly.Load("ClipBridge.Windows").GetType("ClipboardOrigin")!;var origin=Guid.NewGuid().ToString("N");var eventId=Guid.NewGuid().ToString("N");var remote=(DataObject)originType.GetMethod("RemoteText")!.Invoke(null,["mesh event",origin,eventId])!;
+        for(int receiver=0;receiver<2;receiver++)if(!(bool)originType.GetMethod("IsRemote")!.Invoke(null,[remote])!)throw new Exception("Remote event lost provenance at a receiver");remote.SetText("new local text",TextDataFormat.UnicodeText);if((bool)originType.GetMethod("IsRemote")!.Invoke(null,[remote])!)throw new Exception("Stale marker suppressed a new local copy");Console.WriteLine("PASS one remote event is non-forwardable at both Windows receivers; changed local content remains sendable");
         var assembly=Assembly.Load("ClipBridge.Windows");
+        using(var dialog=new Form()){assembly.GetType("AppStyle")!.GetMethod("Dialog",BindingFlags.Public|BindingFlags.Static)!.Invoke(null,[dialog,"test",new System.Drawing.Size(500,400)]);using var stream=assembly.GetManifestResourceStream("ClipBridge.App.ico")!;using var expected=new System.Drawing.Icon(stream);using var actualBitmap=dialog.Icon!.ToBitmap();using var expectedBitmap=expected.ToBitmap();if(actualBitmap.Size!=expectedBitmap.Size||Enumerable.Range(0,actualBitmap.Width).Any(x=>Enumerable.Range(0,actualBitmap.Height).Any(y=>actualBitmap.GetPixel(x,y)!=expectedBitmap.GetPixel(x,y))))throw new Exception("Dialog icon differs from app icon");}Console.WriteLine("PASS all app dialogs use the embedded ClipBridge icon");
+
+        var wizardType=assembly.GetType("GroupWizard")!;
+        var testIdentity=GroupIdentity.Create(Guid.NewGuid().ToString("N"),"Form order check");
+        Func<string,GroupConnection,string,CancellationToken,Task<DeviceGroup>> noCreate=(_,_,_,_)=>throw new Exception("Layout check must not connect");
+        foreach(bool joining in new[]{false,true}){
+            using var wizard=(Form)Activator.CreateInstance(wizardType,[testIdentity,joining,null!,noCreate,(Action)(()=>{}),(Action<DeviceGroup>)(_=>{}),(Action<string>)(_=>{})])!;
+            object Field(string name)=>wizardType.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(wizard)!;
+            var transport=(ComboBox)Field("transport");var account=(Control)Field("usernameRow");var password=(Control)Field("passwordRow");
+            wizard.ShowInTaskbar=false;wizard.Show();Application.DoEvents();
+            for(int change=0;change<3;change++){
+                transport.SelectedIndex=1;wizard.PerformLayout();account.Parent!.PerformLayout();Application.DoEvents();
+                if(!account.Visible||!password.Visible||account.Bottom>password.Top||account.TabIndex>=password.TabIndex)throw new Exception("WebDAV account must render and tab before password");
+                if(!account.Controls.OfType<Label>().Any(c=>c.Text=="WebDAV账号")||!password.Controls.OfType<Label>().Any(c=>c.Text=="WebDAV密码"))throw new Exception("WebDAV field labels differ");
+                transport.SelectedIndex=0;
+            }
+            wizard.Close();
+        }
+        Console.WriteLine("PASS WebDAV create/join forms render account above password with matching keyboard order after transport switches");
+
         if(assembly.EntryPoint!.GetCustomAttribute<STAThreadAttribute>() is null)throw new Exception("STA missing");
         string directory=Path.Combine(Path.GetTempPath(),"clipbridge-ui-"+Guid.NewGuid().ToString("N"));
         var type=assembly.GetType("BridgeWindow")!;using var form=(Form)Activator.CreateInstance(type,[Array.Empty<string>(),"ui-test-"+Guid.NewGuid().ToString("N"),directory])!;
@@ -19,6 +43,11 @@ internal static class Program
         var controls=Tree(form).ToArray();for(int i=0;i<5;i++)render.Invoke(form,null);
         if(!controls.SequenceEqual(Tree(form)))throw new Exception("Status refresh recreated controls");
         Console.WriteLine("PASS status refresh preserves controls and focus");
+        if(Tree(form).OfType<Button>().Any(b=>b.Text is "配置" or "添加配置" or "导入配置"))throw new Exception("Obsolete configuration navigation remains");
+        Console.WriteLine("PASS navigation uses groups without duplicate configuration page");
+        var pendingType=assembly.GetType("ClipboardBatch")!;var pending=Activator.CreateInstance(pendingType)!;var targets=profiles.Select(p=>p.Group).Distinct().ToList();pendingType.GetProperty("Text")!.SetValue(pending,"test");pendingType.GetProperty("Groups")!.SetValue(pending,targets);data.GetType().GetProperty("Clipboard")!.SetValue(data,pending);type.GetMethod("Reconcile",BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(form,null);if(targets.Any(g=>!((List<string>)pendingType.GetProperty("DoneGroups")!.GetValue(pending)!).Contains(g)))throw new Exception("Disabled group retained a pending text target");data.GetType().GetProperty("Clipboard")!.SetValue(data,null);
+        Console.WriteLine("PASS disabled groups cannot resend queued text after re-enable");
+
         foreach(var size in new[]{new System.Drawing.Size(1000,720),new System.Drawing.Size(900,650),new System.Drawing.Size(1150,800)}){form.ClientSize=size;form.PerformLayout();render.Invoke(form,null);foreach(var card in Tree(form).Where(c=>c.GetType().Name=="SoftPanel"))foreach(Control c in card.Controls)if(c.Left<0||c.Right>card.ClientSize.Width+1)throw new Exception("Card content clipped after resize");}
         Console.WriteLine("PASS rounded cards retain content across window sizes");
         var summary=(Label)type.GetField("summaryText",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(form)!;

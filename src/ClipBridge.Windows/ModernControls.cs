@@ -4,7 +4,7 @@ static class AppStyle
 {
     public static readonly Color Background = Color.FromArgb(245,246,248), Ink=Color.FromArgb(28,34,39), Muted=Color.FromArgb(107,116,122), Green=Color.FromArgb(0,126,111);
     public static GraphicsPath Shape(Rectangle r,int radius) { var p=new GraphicsPath(); int d=Math.Min(radius*2,Math.Min(r.Width,r.Height)); if(d<=0)return p; p.AddArc(r.Left,r.Top,d,d,180,90);p.AddArc(r.Right-d,r.Top,d,d,270,90);p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.Left,r.Bottom-d,d,d,90,90);p.CloseFigure();return p; }
-    public static void Dialog(Form f,string title,Size size) {f.Text=title;f.ClientSize=size;f.MinimumSize=f.Size;f.Font=new Font("Microsoft YaHei UI",10);f.BackColor=Background;f.StartPosition=FormStartPosition.CenterParent;f.MinimizeBox=false;f.MaximizeBox=false;f.Padding=new Padding(24);}
+    public static void Dialog(Form f,string title,Size size) {using var stream=typeof(AppStyle).Assembly.GetManifestResourceStream("ClipBridge.App.ico")!;f.Icon=new Icon(stream);f.Text=title;f.ClientSize=size;f.MinimumSize=f.Size;f.Font=new Font("Microsoft YaHei UI",10);f.BackColor=Background;f.StartPosition=FormStartPosition.CenterParent;f.MinimizeBox=false;f.MaximizeBox=false;f.Padding=new Padding(24);}
 }
 sealed class SoftPanel:Panel
 {

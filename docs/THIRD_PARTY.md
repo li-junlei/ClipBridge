@@ -14,3 +14,6 @@ SyncClipboard Xposed was consulted as a visual reference; no project source file
 
 Microsoft.Toolkit.Uwp.Notifications 7.1.3: MIT, https://github.com/CommunityToolkit/WindowsCommunityToolkit
 License included in LICENSE-TOAST-TOOLKIT.md.
+
+BouncyCastle.Cryptography 2.7.0 (.NET) and bcprov-jdk18on 1.86 (Android): Bouncy Castle MIT license, https://www.bouncycastle.org/
+License included in LICENSE-BOUNCYCASTLE.md. J-PAKE uses the libraries’ NIST 3072-bit group and SHA-256 implementation.

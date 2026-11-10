@@ -12,6 +12,8 @@ try {
     if (-not $?) { throw 'Windows installer build failed' }
     dotnet run --project tests/ClipBridge.Tests
     if ($LASTEXITCODE) { throw 'Protocol checks failed' }
+    python tests/group_flow.py
+    if ($LASTEXITCODE) { throw 'Group pairing checks failed' }
     python tests/integration.py
     if ($LASTEXITCODE) { throw 'Integration checks failed' }
     python tests/attachment_flow.py

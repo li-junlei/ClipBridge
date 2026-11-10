@@ -44,6 +44,7 @@ final class Engine {
                 CharSequence text=clip.getItemAt(0).getText();
                 if(text==null || text.length()>65536) return;
                 String s=text.toString();
+                if(s.regionMatches(true,0,"clipbridge://",0,13))return;
                 if(s.equals(lastObserved)) return;
                 lastObserved=s;EngineRouter.copy(s);
             }catch(Throwable ignored){}
@@ -106,8 +107,8 @@ final class Engine {
                     main.post(()->{
                         try{
                             if(paused || generation.get()!=expected || !isCurrent(c)) return;
-                            lastObserved=content;
-                            clipboard.setPrimaryClip(ClipData.newPlainText("ClipBridge",content));
+                            lastObserved=content;EngineRouter.received(content);
+                            ClipData currentClip=clipboard.getPrimaryClip();boolean same=currentClip!=null&&currentClip.getItemCount()==1&&content.contentEquals(currentClip.getItemAt(0).getText()==null?"":currentClip.getItemAt(0).getText());if(!same)clipboard.setPrimaryClip(ClipData.newPlainText("ClipBridge",content));
                             worker.execute(()->{if(config==c){metrics(c,"lastSync",System.currentTimeMillis());status("已接收并写入剪贴板");}});
                         }catch(Throwable e){worker.execute(()->status("远端内容已接收，但剪贴板写入失败"));}
                     });

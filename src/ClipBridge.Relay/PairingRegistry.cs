@@ -29,7 +29,7 @@ sealed class PairingRegistry
         if (code.Length < 24 || code.Length > 96) throw new InvalidDataException("Invalid setup code.");
         setupHash = SHA256.HashData(Encoding.UTF8.GetBytes(code));
         // Deliberate owner-only bootstrap output. Never include this code in HTTP responses or QR invitations.
-        Console.WriteLine("ClipBridge 配对管理码（仅用于电脑添加配对，请勿分享）: " + code);
+        Console.WriteLine("ClipBridge 配对管理码（仅用于创建同步组或旧版配对，请勿分享）: " + code);
     }
     public bool IsSetup(string? token) => token is not null && CryptographicOperations.FixedTimeEquals(
         setupHash, SHA256.HashData(Encoding.UTF8.GetBytes(token)));

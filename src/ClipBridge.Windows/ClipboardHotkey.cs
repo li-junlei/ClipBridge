@@ -18,13 +18,13 @@ sealed partial class BridgeWindow
     private void UploadClipboard()
     {
         if(paused){Notify("全部同步已暂停，请先恢复。");return;}
-        if(!data.Profiles.Any(p=>p.Enabled)){Notify("请先开启至少一套配置。");return;}
+        if(!data.Profiles.Any(p=>p.Enabled)){Notify("请先开启一个包含接收设备的同步组。");return;}
         try{
             if(Clipboard.ContainsImage()){
                 using var image=Clipboard.GetImage();if(image is null)return;if((long)image.Width*image.Height>20000000){Notify("图片超过 2000 万像素，请作为文件发送。");return;}
                 _=SendCopiedImage(new Bitmap(image),true);
             }else if(Clipboard.ContainsText()){
-                string text=Clipboard.GetText();data.Clipboard=new(){Text=text,Clock=checked(++data.NextClock),Targets=data.Profiles.Where(p=>p.Enabled).Select(p=>p.Config.Pair).ToList(),Groups=data.Profiles.Where(p=>p.Enabled).Select(p=>p.Group).Distinct().ToList()};Save();Notify("当前文本已加入发送队列。");
+                string text=Clipboard.GetText();if(text.StartsWith("clipbridge://",StringComparison.OrdinalIgnoreCase)){Notify("配对邀请不作为普通剪贴板内容发送。");return;}data.Clipboard=new(){Text=text,Clock=checked(++data.NextClock),Targets=data.Profiles.Where(p=>p.Enabled).Select(p=>p.Config.Pair).ToList(),Groups=data.Profiles.Where(p=>p.Enabled).Select(p=>p.Group).Distinct().ToList()};Save();Notify("当前文本已加入发送队列。");
             }else Notify("当前剪贴板没有可同步的文本或图片。");
         }catch{Notify("暂时无法读取剪贴板，请稍后重试。");}
     }

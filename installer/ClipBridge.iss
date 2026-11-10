@@ -38,6 +38,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb"
 Source: "..\docs\THIRD_PARTY.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "..\docs\LICENSE-BOUNCYCASTLE.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\docs\LICENSE-QRCODER.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\docs\LICENSE-TOAST-TOOLKIT.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\licenses"; Flags: ignoreversion

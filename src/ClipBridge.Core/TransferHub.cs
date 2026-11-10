@@ -6,11 +6,11 @@ public sealed class BridgeProfile
     public required ClientConfig Config{get;set;}
     public bool Enabled{get;set;}=true;
     public SyncState State{get;set;}=new();
-    public string Name{get;set;}="";
+    public string GroupKey{get;set;}="";public string GroupId{get;set;}="";public string GroupPeer{get;set;}="";public string Name{get;set;}="";
     public string PeerIdentity{get;set;}="";
     public long LastSync{get;set;}
     public string Status{get;set;}="等待连接";
-    public string Group=>PeerIdentity.Length==32?PeerIdentity:Config.Pair;
+    public string Group=>GroupKey.Length>0?"trusted:"+GroupKey:PeerIdentity.Length==32?PeerIdentity:Config.Pair;
     public string Title=>Name.Length==0?Config.Transport+" · "+Config.Pair[..6]:Name;
 }
 public sealed class OutgoingAttachment

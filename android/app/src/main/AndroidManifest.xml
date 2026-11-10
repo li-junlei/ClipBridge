@@ -19,13 +19,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="clipbridge" android:host="pair" />
-                <data android:scheme="clipbridge" android:host="webdav" />
+                <data android:scheme="clipbridge" android:host="group" />
             </intent-filter>
         </activity>
         <activity-alias android:name=".Launcher" android:targetActivity=".MainActivity" android:enabled="true" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
+        <activity android:name=".GroupActivity" android:exported="false" android:launchMode="singleTop" />
         <activity android:name=".OpenReceivedActivity" android:exported="false" android:theme="@android:style/Theme.NoDisplay" />
         <activity android:name=".ShareActivity" android:exported="true" android:label="ClipBridge">
             <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="*/*" /></intent-filter>
