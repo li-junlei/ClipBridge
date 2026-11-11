@@ -14,6 +14,10 @@ try {
     if ($LASTEXITCODE) { throw 'Protocol checks failed' }
     python tests/group_flow.py
     if ($LASTEXITCODE) { throw 'Group pairing checks failed' }
+    python tests/attachment_notifications.py
+    if ($LASTEXITCODE) { throw 'Attachment notification regression checks failed' }
+    python tests/group_completion.py
+    if ($LASTEXITCODE) { throw 'Group completion regression checks failed' }
     python tests/integration.py
     if ($LASTEXITCODE) { throw 'Integration checks failed' }
     python tests/attachment_flow.py

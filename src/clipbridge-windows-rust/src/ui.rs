@@ -723,6 +723,11 @@ impl Desktop {
                         )),
                 ),
         );
+        let count = s.hidden_connections;
+        view = view.child(card().child(title("同步组维护")).child(muted(format!("发现 {count} 条未显示同步组的残留连接状态"))).child(
+            Button::new("clean-hidden-groups").label("清理未显示的同步组").on_click(cx.listener(move |this, _, _, cx| {
+                this.overlay = Overlay::Confirm(format!("清理 {count} 条残留连接状态？正常同步组和防重放记录会保留。其他设备上的成员记录需在对应设备管理成员中移除。"), Command::CleanHidden); cx.notify();
+            }))));
         view.into_any_element()
     }
     fn modal(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -740,6 +745,17 @@ impl Desktop {
             .icon(IconName::Close)
             .on_click(cx.listener(|this, _, _, cx| {
                 if matches!(this.overlay, Overlay::Pair) {
+                    if this
+                        .snapshot
+                        .as_ref()
+                        .and_then(|s| s.paired.as_ref())
+                        .map(|p| !p.closing_allowed && p.approved && !p.done)
+                        .unwrap_or(false)
+                    {
+                        this.notice = "正在完成入组，请等待完成后再关闭".into();
+                        cx.notify();
+                        return;
+                    }
                     this.send(Command::CancelPairing);
                     this.qr = None;
                     this.qr_link.clear();
@@ -1192,7 +1208,7 @@ impl Render for Desktop {
                     .map(|s| s.own_name.clone())
                     .unwrap_or_default(),
             ))
-            .child(muted("0.7.0"));
+            .child(muted(env!("CARGO_PKG_VERSION")));
         let body = match self.page {
             0 => self.status(cx),
             1 => self.groups(cx),

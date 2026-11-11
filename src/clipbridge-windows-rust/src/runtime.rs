@@ -150,6 +150,38 @@ impl State {
         self.clipboard = Some(text.clone());
         Ok(Some(text))
     }
+    pub fn uses_webdav(&self, route: &Route) -> bool {
+        self.groups
+            .iter()
+            .find(|g| g.id == route.group)
+            .is_some_and(|g| g.connection.transport == "webdav")
+    }
+    pub fn hidden_routes(&self) -> Vec<String> {
+        let known: BTreeSet<String> = self
+            .groups
+            .iter()
+            .flat_map(|g| {
+                g.members
+                    .values()
+                    .map(|c| g.pair_id(&self.identity.member, &c.member))
+            })
+            .collect();
+        self.routes
+            .iter()
+            .filter(|(id, r)| !known.contains(*id) && (!r.status.is_empty() || r.last_sync != 0))
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+    pub fn clean_hidden_routes(&mut self) -> usize {
+        let hidden = self.hidden_routes();
+        for id in &hidden {
+            if let Some(route) = self.routes.get_mut(id) {
+                route.status.clear();
+                route.last_sync = 0;
+            }
+        }
+        hidden.len()
+    }
     pub fn reroute_jobs(&mut self, routes: &[Route]) -> bool {
         let mut changed = false;
         for job in &mut self.outgoing {
@@ -304,6 +336,7 @@ pub struct PairView {
     pub approved: bool,
     pub done: bool,
     pub busy: bool,
+    pub closing_allowed: bool,
     pub host: bool,
 }
 #[derive(Clone, Serialize)]
@@ -318,6 +351,7 @@ pub struct Snapshot {
     pub last_sync: i64,
     pub paired: Option<PairView>,
     pub notice: String,
+    pub hidden_connections: usize,
 }
 pub enum Event {
     Snapshot(Arc<Snapshot>),
@@ -345,6 +379,7 @@ pub enum Command {
     },
     Invite(String),
     CancelPairing,
+    CleanHidden,
     Approve,
     ToggleGroup(String, bool),
     RemoveMember(String, String),
@@ -369,7 +404,7 @@ enum Work {
     Group(String, Result<Group>),
     Text(Route, Result<Option<Envelope>>),
     Sent(Route, String, Result<()>),
-    Index(Route, Result<Option<transfers::Index>>),
+    Index(Route, Option<String>, Result<Option<transfers::Index>>),
     Upload(Route, String, Result<()>),
     Download(Route, Offer, Result<PathBuf>),
     Stage(Result<Job>),
@@ -553,6 +588,7 @@ impl Engine {
                 .unwrap_or(0),
             paired: self.pair_view.clone(),
             notice: self.notice.clone(),
+            hidden_connections: self.state.hidden_routes().len(),
         };
         let encoded = serde_json::to_string(&snapshot).unwrap_or_default();
         if encoded != self.last_snapshot {
@@ -575,6 +611,9 @@ impl Engine {
     }
     fn update_pair(&mut self) {
         if let Some(p) = &self.pair {
+            if p.done {
+                self.approve_pending = false;
+            }
             self.pair_view = Some(PairView {
                 code: crate::pake::display(&p.code),
                 link: p.link.clone(),
@@ -585,15 +624,15 @@ impl Engine {
                 approved: p.approved,
                 done: p.done,
                 busy: false,
+                closing_allowed: !p.approved || p.done || self.pair_halted,
                 host: p.host(),
             })
         }
     }
     fn active(&self, route: &Route) -> bool {
-        self.state
-            .channels()
-            .iter()
-            .any(|r| r.config.pair == route.config.pair && r.config.key == route.config.key)
+        self.state.channels().iter().any(|r| {
+            serde_json::to_value(&r.config).ok() == serde_json::to_value(&route.config).ok()
+        })
     }
     async fn command(&mut self, c: Command) -> Result<()> {
         if !matches!(
@@ -609,7 +648,10 @@ impl Engine {
             Command::Open => {
                 let _ = self.events.try_send(Event::Open);
             }
-            Command::Quit => self.quitting = true,
+            Command::Quit => {
+                ensure!(!self.pair_locked(), "正在完成入组，请等待完成后退出");
+                self.quitting = true;
+            }
             Command::Notice(s) => self.notice(s),
             Command::TogglePause => {
                 self.state.settings.paused = !self.state.settings.paused;
@@ -757,7 +799,7 @@ impl Engine {
                 setup,
             } => {
                 ensure!(self.state.groups.len() < 4, "最多保存 4 个同步组");
-                self.cancel_pair();
+                self.cancel_pair()?;
                 self.pair_busy = true;
                 self.pair_view = Some(PairView {
                     busy: true,
@@ -789,7 +831,7 @@ impl Engine {
                     .find(|g| g.id == id)
                     .cloned()
                     .ok_or_else(|| anyhow::anyhow!("同步组不存在"))?;
-                self.cancel_pair();
+                self.cancel_pair()?;
                 self.pair_busy = true;
                 self.pair_view = Some(PairView {
                     busy: true,
@@ -814,7 +856,7 @@ impl Engine {
                     connection = parsed.connection;
                     code = parsed.code
                 }
-                self.cancel_pair();
+                self.cancel_pair()?;
                 self.pair_busy = true;
                 self.pair_view = Some(PairView {
                     busy: true,
@@ -825,14 +867,34 @@ impl Engine {
                 let own = self.state.identity.clone();
                 self.work.push(async move{Work::Pair(generation,Session::join(connection,&code,own).await)}.boxed());
             }
-            Command::CancelPairing => self.cancel_pair(),
+            Command::CancelPairing => self.cancel_pair()?,
+            Command::CleanHidden => {
+                let removed = self.state.clean_hidden_routes();
+                self.remote.clear();
+                self.index_versions.clear();
+                if self.save() {
+                    self.notice(format!("已清理 {removed} 条隐藏连接状态；防重放记录已保留"));
+                }
+            }
             Command::Approve => {
+                if self
+                    .pair_view
+                    .as_ref()
+                    .map(|p| p.approved || p.done)
+                    .unwrap_or(true)
+                {
+                    return Ok(());
+                }
                 self.approve_pending = true;
                 if let Some(pair) = &mut self.pair {
                     pair.approve()?;
                     self.approve_pending = false
                 }
                 self.update_pair();
+                if let Some(view) = &mut self.pair_view {
+                    view.approved = true;
+                    view.closing_allowed = false;
+                }
             }
             Command::Clipboard(force) => {
                 if self.state.settings.paused {
@@ -942,13 +1004,24 @@ impl Engine {
         }
         Ok(())
     }
-    fn cancel_pair(&mut self) {
+    fn pair_locked(&self) -> bool {
+        !self.pair_halted
+            && (self.approve_pending
+                || self
+                    .pair_view
+                    .as_ref()
+                    .map(|p| p.approved && !p.done)
+                    .unwrap_or(false))
+    }
+    fn cancel_pair(&mut self) -> Result<()> {
+        ensure!(!self.pair_locked(), "正在完成入组，请等待完成后再关闭");
         self.pair_generation += 1;
         self.pair = None;
         self.pair_view = None;
         self.pair_busy = false;
         self.pair_halted = false;
         self.approve_pending = false;
+        Ok(())
     }
     fn stage(&mut self, paths: Vec<PathBuf>, peer: &str, kind: &str) -> Result<()> {
         ensure!(!self.state.settings.paused, "同步已暂停");
@@ -1182,7 +1255,12 @@ impl Engine {
                     t.elapsed() >= Duration::from_secs(self.state.settings.attachment_interval)
                 })
                 .unwrap_or(true);
-            if due && !self.attachments_busy.contains(&pair) {
+            let retry_due = self
+                .retry_after
+                .get(&format!("index:{pair}"))
+                .map(|t| *t <= Instant::now())
+                .unwrap_or(true);
+            if due && retry_due && !self.attachments_busy.contains(&pair) {
                 self.attachments_busy.insert(pair.clone());
                 self.last_attachment.insert(pair.clone(), Instant::now());
                 let r = route.clone();
@@ -1219,15 +1297,22 @@ impl Engine {
                     .take(128)
                     .collect();
                 let version = hash(serde_json::to_vec(&(&offers, &decisions)).unwrap_or_default());
-                let publish = self
+                let empty = offers.is_empty() && decisions.is_empty();
+                let empty_version = hash(
+                    serde_json::to_vec(&(Vec::<Offer>::new(), Vec::<Decision>::new())).unwrap(),
+                );
+                let has_previous = self
                     .index_versions
                     .get(&pair)
-                    .map(|(v, t)| v != &version || t.elapsed() >= Duration::from_secs(900))
-                    .unwrap_or(true);
-                if publish {
-                    self.index_versions
-                        .insert(pair.clone(), (version, Instant::now()));
-                }
+                    .map(|(v, _)| v != &empty_version)
+                    .unwrap_or(false);
+                let publish = (!empty || has_previous)
+                    && self
+                        .index_versions
+                        .get(&pair)
+                        .map(|(v, t)| v != &version || t.elapsed() >= Duration::from_secs(900))
+                        .unwrap_or(true);
+                let published_version = publish.then_some(version);
                 self.work.push(
                     async move {
                         let result = async {
@@ -1240,7 +1325,7 @@ impl Engine {
                             Ok(remote)
                         }
                         .await;
-                        Work::Index(r, result)
+                        Work::Index(r, published_version, result)
                     }
                     .boxed(),
                 );
@@ -1500,31 +1585,46 @@ impl Engine {
                 self.pair = Some(pair);
                 self.update_pair();
             }
-            Work::PairStep(generation, pair, result) => {
+            Work::PairStep(generation, mut pair, result) => {
                 if generation != self.pair_generation {
                     return Ok(());
                 }
                 self.pair_busy = false;
-                if pair.host() {
+                if pair.host() && pair.done {
                     if let Some(group) = &pair.group {
                         if let Some(current) =
                             self.state.groups.iter_mut().find(|g| g.id == group.id)
                         {
                             if group.sequence > current.sequence {
                                 *current = group.clone();
+                                self.last_group.remove(&group.id);
                                 self.save();
                             }
                         }
                     }
                 }
-                if pair.done && !pair.host() {
+                if pair.needs_install() {
+                    let previous = self.state.groups.clone();
                     let received = pair.group.clone().unwrap();
                     let old = self.state.groups.iter().find(|g| g.id == received.id);
-                    let installed = received.install(old, &self.state.identity)?;
+                    let installed = match received.install(old, &self.state.identity) {
+                        Ok(group) => group,
+                        Err(error) => {
+                            self.pair_halted = true;
+                            pair.status = error.to_string();
+                            self.pair = Some(pair);
+                            self.update_pair();
+                            return Err(error);
+                        }
+                    };
                     self.state.groups.retain(|g| g.id != installed.id);
                     self.last_group.remove(&installed.id);
                     self.state.groups.push(installed);
-                    self.save();
+                    if self.save() {
+                        pair.mark_installed();
+                    } else {
+                        self.state.groups = previous;
+                    }
                 }
                 if let Err(e) = &result {
                     self.notice(e.to_string());
@@ -1617,13 +1717,22 @@ impl Engine {
                     *attempt += 1;
                 }
             }
-            Work::Index(route, result) => {
+            Work::Index(route, published_version, result) => {
                 self.attachments_busy.remove(&route.config.pair);
                 if !self.active(&route) {
                     return Ok(());
                 }
                 match result {
                     Ok(index) => {
+                        if let Some(version) = published_version {
+                            self.index_versions
+                                .insert(route.config.pair.clone(), (version, Instant::now()));
+                        }
+                        self.retry_after
+                            .remove(&format!("index:{}", route.config.pair));
+                        if index.is_none() {
+                            self.remote.remove(&route.config.pair);
+                        }
                         if let Some(index) = index {
                             for offer in &index.offers {
                                 if offer.sender != route.peer.id || offer.expires <= now() {
@@ -1698,8 +1807,35 @@ impl Engine {
                         }
                     }
                     Err(e) => {
-                        self.index_versions.remove(&route.config.pair);
-                        self.notice(format!("附件连接失败：{e}"));
+                        self.remote.remove(&route.config.pair);
+                        let error_key = format!("index:{}", route.config.pair);
+                        let warn = !self.retry_after.contains_key(&error_key);
+                        self.retry_after
+                            .insert(error_key, Instant::now() + Duration::from_secs(30));
+                        let pending = self
+                            .state
+                            .outgoing
+                            .iter()
+                            .chain(self.state.incoming.iter())
+                            .any(|j| {
+                                j.pair == route.config.pair
+                                    && j.offer.expires > now()
+                                    && matches!(
+                                        j.phase.as_str(),
+                                        "waiting" | "accepted" | "sending" | "ready"
+                                    )
+                            });
+                        if pending && warn {
+                            self.notice(format!(
+                                "{} · {}附件连接失败：{e}",
+                                route.peer.name,
+                                if self.state.uses_webdav(&route) {
+                                    "WebDAV "
+                                } else {
+                                    "专用中转 "
+                                }
+                            ));
+                        }
                         let alternate = self
                             .state
                             .channels()
@@ -1751,7 +1887,6 @@ impl Engine {
                         }
                     }
                 }
-                self.index_versions.remove(&route.config.pair);
                 self.last_attachment.remove(&route.config.pair);
                 self.save();
             }
@@ -1915,6 +2050,48 @@ mod tests {
             incoming: vec![],
             channels_cache: Default::default(),
         }
+    }
+    #[test]
+    fn relay_group_storage_does_not_use_webdav_error_labels() {
+        let mut s = state();
+        let peer = Identity::new("Peer").unwrap();
+        let mut group = Group::new(
+            &s.identity,
+            "Relay group",
+            Connection {
+                transport: "relay".into(),
+                server: "https://example.invalid".into(),
+                username: String::new(),
+                password: String::new(),
+            },
+        )
+        .unwrap();
+        group.add(&s.identity, &peer.member).unwrap();
+        s.groups.push(group);
+        let route = s.channels().into_iter().next().unwrap();
+        assert_eq!(route.config.transport, "webdav");
+        assert!(!s.uses_webdav(&route));
+    }
+    #[test]
+    fn hidden_route_cleanup_preserves_replay_protection() {
+        let mut s = state();
+        let pair = id();
+        s.routes.insert(
+            pair.clone(),
+            RouteState {
+                clock: 42,
+                received: 41,
+                winner: "peer".into(),
+                last_sync: 100,
+                status: "stale connection".into(),
+                last_id: id(),
+            },
+        );
+        assert_eq!(s.clean_hidden_routes(), 1);
+        assert_eq!(s.routes[&pair].clock, 42);
+        assert_eq!(s.routes[&pair].received, 41);
+        assert!(!s.routes[&pair].last_id.is_empty());
+        assert_eq!(s.clean_hidden_routes(), 0);
     }
     #[test]
     fn three_device_text_is_not_received_twice_across_groups() {

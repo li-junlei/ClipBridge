@@ -161,6 +161,8 @@ pub struct Session {
     approval_sent: bool,
     peer_approved: bool,
     group_added: bool,
+    pending_group: Option<Group>,
+    installed: bool,
     grant_sent: bool,
 }
 impl Session {
@@ -198,6 +200,8 @@ impl Session {
             approval_sent: false,
             peer_approved: false,
             group_added: false,
+            pending_group: None,
+            installed: false,
             grant_sent: false,
         })
     }
@@ -256,6 +260,12 @@ impl Session {
         )?;
         signal.write("b1", &pake.round1()?).await?;
         Self::build(own, pake, signal, meta, false, code, connection, None)
+    }
+    pub fn needs_install(&self) -> bool {
+        !self.host && self.stage == 6 && !self.installed
+    }
+    pub fn mark_installed(&mut self) {
+        self.installed = true;
     }
     pub fn ready(&self) -> bool {
         self.stage >= 4 && !self.done
@@ -409,13 +419,14 @@ impl Session {
             }
             if self.host {
                 if !self.group_added {
-                    self.group.as_mut().unwrap().add(&self.own, &peer)?;
+                    let mut pending = self.group.as_ref().unwrap().clone();
+                    pending.add(&self.own, &peer)?;
+                    self.pending_group = Some(pending);
                     self.group_added = true;
                     return Ok(());
                 }
                 if !self.grant_sent {
-                    publish(self.group.as_ref().unwrap(), &self.own).await?;
-                    self.send("grant", &self.group.as_ref().unwrap().export())
+                    self.send("grant", &self.pending_group.as_ref().unwrap().export())
                         .await?;
                     self.grant_sent = true
                 }
@@ -449,26 +460,32 @@ impl Session {
                 g.own_removed.clear();
                 g.sequence = 1;
                 self.group = Some(g);
-                self.send(
-                    "done",
-                    &Approval {
-                        accepted: true,
-                        proof: String::new(),
-                    },
-                )
-                .await?;
-                self.done = true;
-                self.status = "已加入同步组".into()
+                self.stage = 6;
+                self.status = "正在保存同步组".into();
+                return Ok(());
             }
         }
         if self.stage == 5 {
             if let Some(box_) = self.signal.get::<Boxed>("done").await? {
                 let approval: Approval = self.pake.open("done", &box_)?;
                 if approval.accepted {
+                    self.group = self.pending_group.take();
                     self.done = true;
                     self.status = "新设备已加入".into()
                 }
             }
+        }
+        if self.stage == 6 && self.installed {
+            self.send(
+                "done",
+                &Approval {
+                    accepted: true,
+                    proof: String::new(),
+                },
+            )
+            .await?;
+            self.done = true;
+            self.status = "已加入同步组".into();
         }
         Ok(())
     }
@@ -477,3 +494,37 @@ impl Session {
     }
 }
 use sha2::Digest;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn guest_cannot_acknowledge_before_local_install() {
+        let own = Identity::new("Guest").unwrap();
+        let connection = Connection {
+            transport: "relay".into(),
+            server: "https://example.invalid".into(),
+            username: String::new(),
+            password: String::new(),
+        };
+        let code = pake::new_code();
+        let mut pake = Pake::new(&code, false, "test").unwrap();
+        let meta = InviteMeta {
+            group: id(),
+            root: "a".repeat(64),
+            expires: now() + 300,
+            first: pake.round1().unwrap(),
+        };
+        let signal = Signal::new(&connection, &code).unwrap();
+        let mut session =
+            Session::build(own, pake, signal, meta, false, code, connection, None).unwrap();
+        session.stage = 6;
+        session.approved = true;
+        assert!(session.needs_install());
+        session.step().await.unwrap();
+        assert!(!session.done);
+        assert!(!session.boxes.contains_key("done"));
+        session.mark_installed();
+        assert!(!session.needs_install());
+    }
+}

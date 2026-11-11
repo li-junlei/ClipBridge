@@ -23,7 +23,7 @@ impl Http {
                     .timeout(Duration::from_secs(30))
                     .pool_idle_timeout(Duration::from_secs(120))
                     .pool_max_idle_per_host(8)
-                    .user_agent("ClipBridge/0.7.0")
+                    .user_agent(concat!("ClipBridge/", env!("CARGO_PKG_VERSION")))
                     .build()
                     .expect("TLS client configuration")
             })

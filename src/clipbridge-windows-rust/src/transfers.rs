@@ -96,9 +96,11 @@ pub async fn get_index(http: &Http, c: &Config) -> Result<Option<Index>> {
         return Ok(None);
     };
     let index: Index = e.open(&index_config(c))?;
+    validate_index(index)
+}
+fn validate_index(index: Index) -> Result<Option<Index>> {
     ensure!(
         index.created <= now() + 60
-            && index.expires > now()
             && index.expires >= index.created
             && index.expires - index.created <= 3600
             && index.offers.len() <= 32
@@ -115,7 +117,7 @@ pub async fn get_index(http: &Http, c: &Config) -> Result<Option<Index>> {
             "附件决定无效"
         )
     }
-    Ok(Some(index))
+    Ok((index.expires > now()).then_some(index))
 }
 pub async fn put_index(
     http: &mut Http,
@@ -311,4 +313,46 @@ pub async fn save_download(job: &Job, directory: &Path) -> Result<PathBuf> {
         }
     }
     anyhow::bail!("无法分配接收文件名")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn expired_indexes_are_absent_but_malformed_lifetimes_fail() {
+        assert!(
+            validate_index(Index {
+                created: now() - 3600,
+                expires: now(),
+                ..Default::default()
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            validate_index(Index {
+                created: now(),
+                expires: now() + 3600,
+                ..Default::default()
+            })
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            validate_index(Index {
+                created: now() - 7200,
+                expires: now(),
+                ..Default::default()
+            })
+            .is_err()
+        );
+        assert!(
+            validate_index(Index {
+                created: now() + 3600,
+                expires: now() + 7200,
+                ..Default::default()
+            })
+            .is_err()
+        );
+    }
 }

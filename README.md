@@ -4,13 +4,13 @@
 
 ClipBridge 使用 WebDAV 或自托管 Docker 中转，同步文本、图片和文件。内容在发送设备加密，在接收设备解密；中转保存密文，不持有内容密钥。不兼容原版 SyncClipboard 协议，不提供明文模式。
 
-> 当前正式版本为 **0.7.0**，安装包见 [Releases](https://github.com/li-junlei/ClipBridge/releases/latest)。Windows 已全量改为 Rust + GPUI，需要重新配对；Android 继续使用兼容的 **0.6.3**，现有支持同步组的服务器无需更新。
+> 当前正式版本为 **0.7.1**，Windows 与 Android 版本已统一，安装包见 [Releases](https://github.com/li-junlei/ClipBridge/releases/latest)。修复后台附件误报、入组中断并新增残留连接清理，建议双端一并升级；现有支持同步组的服务器无需更新。
 
 ## Windows Rust / GPUI 重构
 
 Windows 0.7.0 已改为全量 Rust：GPUI 界面、协议加密、配对、同步组、网络、剪贴板和系统集成都在同一原生进程内，不启动 .NET 引擎或 WebView。服务端与 Android 保持原协议实现。
 
-新版使用独立的 `%LOCALAPPDATA%/ClipBridgeRust` 数据目录，不导入旧 Windows 数据；覆盖安装后请重新建组或从已有设备邀请加入。旧数据保留在磁盘上。升级前请从托盘退出旧客户端。
+Rust 客户端使用独立的 `%LOCALAPPDATA%/ClipBridgeRust` 数据目录。Windows 从 0.7.0 升级到 0.7.1 保留身份、同步组和配对；仅从更早的 .NET 客户端首次迁移时需要重新配对，旧数据仍保留。升级前请从托盘退出旧客户端。
 
 只构建 Windows 安装程序：
 

@@ -86,6 +86,13 @@ async fn main() -> Result<()> {
             let deadline = std::time::Instant::now();
             while !session.done {
                 session.step().await?;
+                if session.needs_install() {
+                    std::fs::write(
+                        dir.join("installed-group.json"),
+                        serde_json::to_vec(session.group.as_ref().unwrap())?,
+                    )?;
+                    session.mark_installed();
+                }
                 if session.ready() && !session.approved {
                     std::fs::write(dir.join("rust-sas.txt"), &session.sas)?;
                     if let Ok(sas) = std::fs::read_to_string(dir.join("peer-sas.txt")) {

@@ -4,6 +4,20 @@ import java.util.*;
 final class GroupStateOps {
     static JSONObject empty()throws Exception{return new JSONObject().put("groups",new JSONArray());}
     static JSONObject find(JSONObject state,String id)throws Exception{JSONArray groups=state.getJSONArray("groups");for(int i=0;i<groups.length();i++)if(groups.getJSONObject(i).getString("id").equals(id))return groups.getJSONObject(i);return null;}
+    static void describeTransport(JSONObject state,JSONObject profile)throws Exception{
+        String groupId=profile.optString("groupId");JSONObject group=groupId.isEmpty()?null:find(state,groupId);
+        profile.put("connectionTransport",group!=null?group.getJSONObject("connection").optString("transport","relay"):groupId.isEmpty()?profile.getJSONObject("config").optString("transport","relay"):"unknown");
+    }
+    static JSONObject hiddenGroups(JSONObject state,JSONArray profiles)throws Exception{
+        Set<String> ids=new LinkedHashSet<>();int connections=0;
+        for(int i=0;i<profiles.length();i++){String id=profiles.getJSONObject(i).optString("groupId");if(!id.isEmpty()&&find(state,id)==null){ids.add(id);connections++;}}
+        return new JSONObject().put("groups",new JSONArray(ids)).put("connections",connections);
+    }
+    static int cleanHidden(JSONObject state,JSONArray profiles,JSONObject stones)throws Exception{
+        JSONArray hidden=hiddenGroups(state,profiles).getJSONArray("groups"),deleted=state.optJSONArray("deletedGroups");if(deleted==null)deleted=new JSONArray();
+        int removed=0;for(int i=profiles.length()-1;i>=0;i--){JSONObject row=profiles.getJSONObject(i);if(!GroupCrypto.contains(hidden,row.optString("groupId")))continue;JSONObject replay=row.getJSONObject("state");replay.remove("pending");stones.put(row.getJSONObject("config").getString("pair"),replay);profiles.remove(i);removed++;}
+        for(int i=0;i<hidden.length();i++)GroupCrypto.add(deleted,hidden.getString(i));state.put("deletedGroups",deleted);return removed;
+    }
     static boolean advances(JSONObject group,JSONObject old,JSONObject next)throws Exception{if(GroupCrypto.certHash(old).equals(GroupCrypto.certHash(next)))return true;String target=old.getJSONObject("member").getString("id");Set<String> known=new HashSet<>();known.add(GroupCrypto.certHash(old));List<JSONObject> candidates=new ArrayList<>();candidates.add(next);JSONObject feeds=group.getJSONObject("feeds");for(String author:GroupCrypto.keys(feeds)){JSONArray certs=feeds.getJSONObject(author).getJSONArray("certificates");for(int i=0;i<certs.length();i++)candidates.add(certs.getJSONObject(i));}for(int pass=0;pass<128;pass++){boolean changed=false;for(JSONObject c:candidates){if(!c.getJSONObject("member").getString("id").equals(target)||c.optString("admission").isEmpty()||!known.contains(c.optString("previous")))continue;JSONObject issuer=group.getJSONObject("members").optJSONObject(c.getString("issuer"));if(issuer==null||!GroupCrypto.verify(issuer.getJSONObject("member"),GroupCrypto.certData(c),c.getString("signature")))continue;changed|=known.add(GroupCrypto.certHash(c));}if(!changed)break;}return known.contains(GroupCrypto.certHash(next));}
     static JSONObject merge(JSONObject state,JSONObject group)throws Exception{
         JSONArray deleted=state.optJSONArray("deletedGroups");if(deleted!=null&&GroupCrypto.contains(deleted,group.getString("id")))throw new IllegalStateException("同步组已从本机删除");GroupCrypto.validate(group);JSONObject identity=state.getJSONObject("identity"),self=identity.getJSONObject("member");String own=self.getString("id");JSONObject ownCert=group.getJSONObject("members").optJSONObject(own);if(ownCert==null||!GroupCrypto.same(ownCert.getJSONObject("member"),self))throw new SecurityException("本机身份不匹配");

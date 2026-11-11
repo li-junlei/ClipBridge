@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 — 2026-11-11
+
+- Unify Windows and Android client versions at 0.7.1; existing pairing and server protocols remain compatible.
+- Stop idle empty attachment manifest uploads; ignore authenticated expired manifests, retain validation of malformed or tampered data, and suppress background-only failure notifications.
+- Invalidate Android attachment clients when connection settings change; identify the actual group connection rather than its internal WebDAV-compatible storage adapter, and deduplicate live-task errors.
+- Keep inviter membership provisional until the joining device saves the group and acknowledges completion; prevent closing approved pairing sessions before completion.
+- Add settings actions to clean invisible/orphan group connections or stale Windows connection state while preserving visible groups and replay protection.
+
 ## 0.7.0 — 2026-11-11
 
 - Rewrite the entire Windows client in Rust with a GPUI interface; no .NET worker or WebView runtime.

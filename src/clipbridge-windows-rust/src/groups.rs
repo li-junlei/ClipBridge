@@ -514,14 +514,17 @@ impl Group {
             self.id
         )
     }
-    pub fn channel(&self, own: &Identity, peer: &Member) -> Result<Config> {
-        let mut ids = [own.member.id.as_str(), peer.id.as_str()];
+    pub fn pair_id(&self, own: &Member, peer: &Member) -> String {
+        let mut ids = [own.id.as_str(), peer.id.as_str()];
         ids.sort();
-        let pair = hash(format!(
+        hash(format!(
             "clipbridge:mesh-pair:1:{}:{}:{}",
             self.id, ids[0], ids[1]
         ))[..32]
-            .to_owned();
+            .to_owned()
+    }
+    pub fn channel(&self, own: &Identity, peer: &Member) -> Result<Config> {
+        let pair = self.pair_id(&own.member, peer);
         let key = kdf(
             &own.agree(peer)?,
             &sha2::Sha256::digest(format!("clipbridge:group-channel:1:{}", self.id)),
