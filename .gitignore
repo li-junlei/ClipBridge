@@ -24,3 +24,5 @@ work/
 .env.*
 !.env.example
 .kotlin/
+
+**/target/

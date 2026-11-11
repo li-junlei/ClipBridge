@@ -4,7 +4,21 @@
 
 ClipBridge 使用 WebDAV 或自托管 Docker 中转，同步文本、图片和文件。内容在发送设备加密，在接收设备解密；中转保存密文，不持有内容密钥。不兼容原版 SyncClipboard 协议，不提供明文模式。
 
-> 当前正式版本为 **0.6.3**，安装包见 [Releases](https://github.com/li-junlei/ClipBridge/releases/latest)。新增多设备同步组，并修复重新入组、多组显示、重复回传、WebDAV 重复邀请及 Windows 表单顺序。组内所有设备请一起升级。
+> 当前正式版本为 **0.7.0**，安装包见 [Releases](https://github.com/li-junlei/ClipBridge/releases/latest)。Windows 已全量改为 Rust + GPUI，需要重新配对；Android 继续使用兼容的 **0.6.3**，现有支持同步组的服务器无需更新。
+
+## Windows Rust / GPUI 重构
+
+Windows 0.7.0 已改为全量 Rust：GPUI 界面、协议加密、配对、同步组、网络、剪贴板和系统集成都在同一原生进程内，不启动 .NET 引擎或 WebView。服务端与 Android 保持原协议实现。
+
+新版使用独立的 `%LOCALAPPDATA%/ClipBridgeRust` 数据目录，不导入旧 Windows 数据；覆盖安装后请重新建组或从已有设备邀请加入。旧数据保留在磁盘上。升级前请从托盘退出旧客户端。
+
+只构建 Windows 安装程序：
+
+```powershell
+./installer/build.ps1
+```
+
+需要 Rust MSVC 工具链、Visual Studio C++ Build Tools / Windows SDK、Python 3 和 Inno Setup 6。构建会静态链接 C 运行库；用户安装后不需要 .NET 或 Rust 工具链。协议测试：`cargo test --manifest-path src/clipbridge-windows-rust/Cargo.toml --locked --lib`。
 
 ## 功能
 
@@ -21,7 +35,7 @@ ClipBridge 使用 WebDAV 或自托管 Docker 中转，同步文本、图片和�
 
 | 组件 | 要求 |
 | --- | --- |
-| Windows | Windows 10/11 x64，安装程序包含 .NET 运行环境 |
+| Windows | Windows 10/11 x64；无需 .NET 运行环境 |
 | Android | Android 10+ 安装下限，需要可用的 LSPosed 或兼容框架；管理界面与模块合一 |
 | 中转 | 支持 HTTPS、Basic 认证与读写目录的 WebDAV，或 Docker 专用中转 |
 
@@ -36,7 +50,7 @@ Android 安装下限不代表所有系统已经验证。模块本身不调用 `s
 
 专用中转只有创建组需要服务器管理码。WebDAV 手动配对还需要相同目录、账号和应用密码；完整邀请可自动读取连接信息。邀请包含敏感配对凭据，只能交给自己的设备。
 
-首页显示状态；“同步组”负责成员及开关；设置负责接收目录、轮询、快捷键和系统集成。既有双设备连接不删除、不更换密钥，统一归入双设备组；增加成员需要重新建组和重新验证身份，不能将早期共享密钥直接复制给更多设备。
+首页显示状态；“同步组”负责成员及开关；设置负责接收目录、轮询、快捷键和系统集成。Android 继续兼容既有双设备连接；Windows 0.7.0 使用新的独立本地身份，需要重新建组或通过新邀请加入。增加成员必须验证身份，不能将早期共享密钥直接复制给更多设备。
 
 详见 [同步组指南](docs/GROUPS.md)、[WebDAV 指南](docs/WEBDAV.md) 和 [文件与图片](docs/MEDIA.md)。
 
@@ -67,7 +81,7 @@ WebDAV 是定期检查，不保证实时。设置可调整文本和附件间隔�
 
 ## 构建与检查
 
-需要 .NET 10 SDK；Windows 安装程序另需 Inno Setup 6（含简体中文）。Android 使用 JDK 17+、Android SDK 37 和仓库内 Gradle wrapper。协议专项需要 Python 与 [测试依赖](tests/requirements.txt)。
+服务端和协议工具需要 .NET 10 SDK；Windows 原生客户端需要 Rust MSVC、C++ Build Tools / Windows SDK、Python 3 与 Inno Setup 6（含简体中文）。Android 使用 JDK 17+、Android SDK 37 和仓库内 Gradle wrapper。协议专项需要 Python 与 [测试依赖](tests/requirements.txt)。
 
 ```powershell
 .\build.ps1
@@ -81,7 +95,8 @@ Windows 安装程序输出至 `artifacts/installer/`，以后继续提供安装�
 ```text
 src/ClipBridge.Core       加密、组成员、配对及设备间传输
 src/ClipBridge.Relay      密文中转和短期邀请
-src/ClipBridge.Windows    Windows 客户端
+src/clipbridge-windows-rust  Rust + GPUI Windows 客户端
+src/ClipBridge.Windows    旧 Windows 实现与兼容资源
 android/                 Android 管理界面及 LSPosed 模块
 deploy/                  Docker 和 CasaOS 模板
 installer/               Windows 安装程序
@@ -90,4 +105,4 @@ tests/                   协议、HTTP、界面及跨平台互操作验证
 
 [验证范围](docs/VALIDATION.md) · [协议文档](docs/PROTOCOL.md) · [贡献指南](CONTRIBUTING.md)
 
-技术路线参考 [SyncClipboard Xposed](https://github.com/shaklow/syncclipboard-xposed)，功能设计参考 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard)。界面使用 Miuix，二维码使用 QRCoder 和 ZXing。源码采用 [MIT License](LICENSE)，第三方组件保留各自许可，见 [第三方声明](docs/THIRD_PARTY.md)。
+技术路线参考 [SyncClipboard Xposed](https://github.com/shaklow/syncclipboard-xposed)，功能设计参考 [SyncClipboard](https://github.com/Jeric-X/SyncClipboard)。Windows 界面使用 GPUI / gpui-component，Android 界面使用 Miuix；二维码组件及其他依赖见第三方声明。源码采用 [MIT License](LICENSE)，第三方组件保留各自许可，见 [第三方声明](docs/THIRD_PARTY.md)。

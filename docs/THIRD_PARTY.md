@@ -17,3 +17,10 @@ License included in LICENSE-TOAST-TOOLKIT.md.
 
 BouncyCastle.Cryptography 2.7.0 (.NET) and bcprov-jdk18on 1.86 (Android): Bouncy Castle MIT license, https://www.bouncycastle.org/
 License included in LICENSE-BOUNCYCASTLE.md. J-PAKE uses the libraries’ NIST 3072-bit group and SHA-256 implementation.
+
+
+## Windows Rust / GPUI
+
+0.7.0 Windows 使用 GPUI 0.2.2、GPUI Component 0.5.1（Apache-2.0）、RustCrypto AES-GCM / P-256 / HKDF / HMAC、reqwest、tokio、arboard、tray-icon、rfd 和 Windows API crate。锁定版本见 `src/clipbridge-windows-rust/Cargo.lock`。安装包随附 Rust 依赖的许可声明和许可文本，位于 `licenses/RUST-THIRD-PARTY-NOTICES.txt`。
+
+J-PAKE 采用现有协议的 NIST 3072-bit 群参数及 Bouncy Castle 兼容编码，以跨语言测试核对证明、密钥确认和安全码；没有切换到不兼容的自定义配对协议。

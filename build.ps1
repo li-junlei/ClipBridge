@@ -6,8 +6,8 @@ try {
     if ($LASTEXITCODE) { throw 'Relay build failed' }
     dotnet publish src/ClipBridge.Tool -c Release -o artifacts/pairing
     if ($LASTEXITCODE) { throw 'Pairing tool build failed' }
-    dotnet publish src/ClipBridge.Windows -c Release -o artifacts/windows
-    if ($LASTEXITCODE) { throw 'Windows build failed' }
+    cargo test --manifest-path src/clipbridge-windows-rust/Cargo.toml --locked --lib
+    if ($LASTEXITCODE) { throw 'Rust Windows checks failed' }
     & (Join-Path $PSScriptRoot 'installer/build.ps1')
     if (-not $?) { throw 'Windows installer build failed' }
     dotnet run --project tests/ClipBridge.Tests

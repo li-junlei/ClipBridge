@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-11-11
+
+- Rewrite the entire Windows client in Rust with a GPUI interface; no .NET worker or WebView runtime.
+- Unify rounded status, group, settings and pairing views with solid colors and capsule switches.
+- Port encrypted relay/WebDAV text, image and consent-based file transfers, group pairing and Windows integration to Rust.
+- Use event-driven clipboard monitoring, reusable network clients, cached device channels and streaming encrypted attachments.
+- Keep Android 0.6.3 and existing group-capable servers compatible. Windows uses independent protected local state and requires fresh pairing; old data is retained.
+- Ship the Windows installer with third-party notices. Eleven Rust tests and 28 interoperability/storage checks passed; native UI and OS integration remain subject to real-device testing.
+
 ## 0.5.4 — 2026-11-10
 
 - Support WebDAV images and files through one streaming encrypted object, encrypted consent/ready manifests and receiver-side integrity validation.

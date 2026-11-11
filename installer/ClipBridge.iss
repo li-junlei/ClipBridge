@@ -1,4 +1,4 @@
-﻿#ifndef AppVersion
+#ifndef AppVersion
   #error AppVersion is required
 #endif
 #ifndef PublishDir
@@ -42,9 +42,12 @@ Source: "..\docs\LICENSE-BOUNCYCASTLE.md"; DestDir: "{app}\licenses"; Flags: ign
 Source: "..\docs\LICENSE-QRCODER.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\docs\LICENSE-TOAST-TOOLKIT.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\licenses"; Flags: ignoreversion
+[InstallDelete]
+#include "legacy-files.iss"
+
 [Icons]
-Name: "{userprograms}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"
-Name: "{userdesktop}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"; Tasks: desktopicon
+Name: "{userprograms}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"; AppUserModelID: "ClipBridge.Desktop"
+Name: "{userdesktop}\ClipBridge"; Filename: "{app}\ClipBridge.Windows.exe"; Tasks: desktopicon; AppUserModelID: "ClipBridge.Desktop"
 [Run]
 Filename: "{app}\ClipBridge.Windows.exe"; Description: "启动 ClipBridge"; Flags: nowait postinstall skipifsilent
 [UninstallRun]
@@ -72,5 +75,8 @@ begin
   if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\clipbridge-desktop\shell\open\command', '', Value) then
     if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --notification "%1"') = 0 then
       RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\clipbridge-desktop');
-  { Pairing data in LocalAppData\ClipBridge is deliberately preserved. }
+  if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\clipbridge-rust\shell\open\command', '', Value) then
+    if CompareText(Value, '"' + ExpandConstant('{app}\ClipBridge.Windows.exe') + '" --notification "%1"') = 0 then
+      RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\clipbridge-rust');
+  { LocalAppData data directories are deliberately preserved. }
 end;
