@@ -589,61 +589,41 @@ impl Desktop {
         let Some(s) = self.snapshot.clone() else {
             return view.into_any_element();
         };
-        let mut settings = s.settings.clone();
-        settings.auto_images = !settings.auto_images;
-        let auto = s.settings.clone();
         view = view.child(
-            card()
-                .child(title("剪贴板"))
-                .child(self.switch_row(
-                    "auto-images",
-                    "复制图片自动发送",
-                    if s.settings.auto_images {
-                        "复制图片后同步到已开启设备"
-                    } else {
-                        "自动发送已关闭，可用下方快捷键手动同步图片"
-                    },
-                    s.settings.auto_images,
-                    move |value| {
-                        let mut set = auto.clone();
-                        set.auto_images = value;
-                        Command::Settings(set)
-                    },
-                ))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_3()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child("手动上传快捷键")
-                                .child(muted(hotkey(&s.settings))),
-                        )
-                        .child(
-                            Button::new("record-hotkey")
-                                .label(if self.recording {
-                                    "请按组合键…"
-                                } else {
-                                    "设置快捷键"
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.recording = true;
-                                    this.focus.focus(window);
-                                    cx.notify()
-                                })),
-                        )
-                        .child({
-                            let mut settings = s.settings.clone();
-                            settings.hotkey_key = 0;
-                            settings.hotkey_modifiers = 0;
-                            self.action("clear-hotkey", "清除", Command::Settings(settings), false)
-                        }),
-                ),
+            card().child(title("剪贴板")).child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child("手动上传快捷键")
+                            .child(muted(hotkey(&s.settings))),
+                    )
+                    .child(
+                        Button::new("record-hotkey")
+                            .label(if self.recording {
+                                "请按组合键…"
+                            } else {
+                                "设置快捷键"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.recording = true;
+                                this.focus.focus(window);
+                                cx.notify()
+                            })),
+                    )
+                    .child({
+                        let mut settings = s.settings.clone();
+                        settings.hotkey_key = 0;
+                        settings.hotkey_modifiers = 0;
+                        self.action("clear-hotkey", "清除", Command::Settings(settings), false)
+                    }),
+            ),
         );
         view = view.child(
             card()

@@ -130,24 +130,22 @@ pub enum Clip {
     Text(String),
     Image(Vec<u8>),
 }
-pub fn clipboard(images: bool) -> Result<Option<Clip>> {
+pub fn clipboard() -> Result<Option<Clip>> {
     let mut c = arboard::Clipboard::new()?;
-    if images {
-        if let Ok(image) = c.get_image() {
-            ensure!(
-                image.width * image.height <= 20_000_000,
-                "图片超过 2000 万像素，请作为文件发送"
-            );
-            let rgba = image::RgbaImage::from_raw(
-                image.width as u32,
-                image.height as u32,
-                image.bytes.into_owned(),
-            )
-            .ok_or_else(|| anyhow::anyhow!("图片无效"))?;
-            let mut png = std::io::Cursor::new(vec![]);
-            image::DynamicImage::ImageRgba8(rgba).write_to(&mut png, image::ImageFormat::Png)?;
-            return Ok(Some(Clip::Image(png.into_inner())));
-        }
+    if let Ok(image) = c.get_image() {
+        ensure!(
+            image.width * image.height <= 20_000_000,
+            "图片超过 2000 万像素，请作为文件发送"
+        );
+        let rgba = image::RgbaImage::from_raw(
+            image.width as u32,
+            image.height as u32,
+            image.bytes.into_owned(),
+        )
+        .ok_or_else(|| anyhow::anyhow!("图片无效"))?;
+        let mut png = std::io::Cursor::new(vec![]);
+        image::DynamicImage::ImageRgba8(rgba).write_to(&mut png, image::ImageFormat::Png)?;
+        return Ok(Some(Clip::Image(png.into_inner())));
     }
     if let Ok(text) = c.get_text() {
         if !text.starts_with("clipbridge://") {

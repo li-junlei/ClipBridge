@@ -20,7 +20,6 @@ use tokio::sync::mpsc;
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub paused: bool,
-    pub auto_images: bool,
     pub text_interval: u64,
     pub attachment_interval: u64,
     pub receive_directory: PathBuf,
@@ -31,7 +30,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             paused: false,
-            auto_images: true,
             text_interval: 2,
             attachment_interval: 3,
             receive_directory: PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default())
@@ -910,15 +908,15 @@ impl Engine {
                     return Ok(());
                 }
 
+                let sequence = platform::sequence();
                 if !force
-                    && platform::sequence()
-                        == platform::CLIP_SEQUENCE.load(std::sync::atomic::Ordering::SeqCst)
+                    && sequence == platform::CLIP_SEQUENCE.load(std::sync::atomic::Ordering::SeqCst)
                 {
                     return Ok(());
                 }
                 if !self.state.settings.paused {
                     self.state.clipboard = None;
-                    let clip = platform::clipboard(force || self.state.settings.auto_images)?;
+                    let clip = platform::clipboard()?;
                     match clip {
                         Some(platform::Clip::Text(text)) => {
                             if !force
@@ -954,21 +952,29 @@ impl Engine {
                             }
                         }
                         Some(platform::Clip::Image(bytes)) => {
-                            let digest = hash(&bytes);
-                            if force || digest != self.last_local_hash {
-                                self.last_local_hash = digest;
-                                let mut unique = BTreeMap::new();
-                                for route in self.state.channels() {
-                                    unique.entry(hash(&route.peer.signing_key)).or_insert(route);
+                            self.last_local_hash.clear();
+                            if !force {
+                                if platform::sequence() != sequence {
+                                    return Ok(());
                                 }
-                                for (_, route) in unique {
-                                    let path = self.cache.join(format!("clipboard-{}.png", id()));
-                                    tokio::fs::write(&path, &bytes).await?;
-                                    self.stage(
-                                        vec![path],
-                                        &hash(&route.peer.signing_key),
-                                        "image",
-                                    )?;
+                                platform::CLIP_SEQUENCE
+                                    .store(sequence, std::sync::atomic::Ordering::SeqCst);
+                                if bytes.len() as u64 > transfers::MAX_CLIPBOARD_IMAGE {
+                                    return Ok(());
+                                }
+                            }
+                            let mut unique = BTreeMap::new();
+                            for route in self.state.channels() {
+                                unique.entry(hash(&route.peer.signing_key)).or_insert(route);
+                            }
+                            for (peer, _) in unique {
+                                let path = self.cache.join(format!("clipboard-{}.png", id()));
+                                tokio::fs::write(&path, &bytes).await?;
+                                if let Err(error) =
+                                    self.stage(vec![path.clone()], &peer, "image", !force)
+                                {
+                                    let _ = tokio::fs::remove_file(path).await;
+                                    return Err(error);
                                 }
                             }
                         }
@@ -976,7 +982,7 @@ impl Engine {
                     }
                 }
             }
-            Command::StageFiles { paths, peer } => self.stage(paths, &peer, "file")?,
+            Command::StageFiles { paths, peer } => self.stage(paths, &peer, "file", false)?,
             Command::Decide(id, accept) => {
                 let job = self
                     .state
@@ -1023,20 +1029,30 @@ impl Engine {
         self.approve_pending = false;
         Ok(())
     }
-    fn stage(&mut self, paths: Vec<PathBuf>, peer: &str, kind: &str) -> Result<()> {
+    fn stage(
+        &mut self,
+        paths: Vec<PathBuf>,
+        peer: &str,
+        kind: &str,
+        clipboard: bool,
+    ) -> Result<()> {
         ensure!(!self.state.settings.paused, "同步已暂停");
         ensure!(
             !paths.is_empty()
                 && paths.len() <= 20
-                && self.stages
-                    + self
-                        .state
-                        .outgoing
-                        .iter()
-                        .filter(|j| matches!(j.phase.as_str(), "waiting" | "ready" | "sending"))
-                        .count()
-                    + paths.len()
-                    <= 20,
+                && (clipboard
+                    || self.stages
+                        + self
+                            .state
+                            .outgoing
+                            .iter()
+                            .filter(|j| {
+                                !j.offer.clipboard
+                                    && matches!(j.phase.as_str(), "waiting" | "ready" | "sending")
+                            })
+                            .count()
+                        + paths.len()
+                        <= 20),
             "最多 20 个待发送文件"
         );
         let route = self
@@ -1067,7 +1083,8 @@ impl Engine {
             self.stages += 1;
             self.work.push(
                 async move {
-                    let result = transfers::stage(&path, &cache, &own, &kind, &peer, &pair).await;
+                    let result =
+                        transfers::stage(&path, &cache, &own, &kind, &peer, &pair, clipboard).await;
                     if kind == "image" {
                         let _ = tokio::fs::remove_file(&path).await;
                     }
@@ -1468,7 +1485,7 @@ impl Engine {
                 }
             }
             if !job.uploaded
-                && (job.offer.kind == "image"
+                && (job.offer.kind == "image" && !job.offer.clipboard
                     || decision.map(|d| d.status == "accepted").unwrap_or(false))
             {
                 if let Some(current) = self
@@ -1943,7 +1960,9 @@ impl Engine {
                     }
                     job.phase = "done".into();
                     let _ = tokio::fs::remove_file(path).await;
-                    let _ = platform::notify(&offer.id, "图片已同步", "已写入剪贴板", &[]);
+                    if !offer.clipboard {
+                        let _ = platform::notify(&offer.id, "图片已同步", "已写入剪贴板", &[]);
+                    }
                 } else {
                     job.phase = "saving".into();
                     let copy = job.clone();
@@ -2175,6 +2194,7 @@ mod tests {
         let peer_key = hash(&peer.member.signing_key);
         state.outgoing.push(Job {
             offer: Offer {
+                clipboard: false,
                 id: id(),
                 name: "file.bin".into(),
                 mime: "application/octet-stream".into(),
@@ -2226,6 +2246,7 @@ mod tests {
         let mut state = state();
         let mut base = Job {
             offer: Offer {
+                clipboard: false,
                 id: id(),
                 name: "file.bin".into(),
                 mime: "application/octet-stream".into(),

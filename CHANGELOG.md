@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2 — 2026-11-23
+
+- Automatically sync Windows clipboard PNGs up to 10 MiB to responding devices. Remove the Windows image auto-send switch.
+- Keep manual Windows image uploads in Android’s notification flow, with confirmation before saving to the album.
+- Add an optional compact Android attachment notification and progress while receiving, verifying, and saving attachments.
+
 ## 0.7.1 — 2026-11-11
 
 - Unify Windows and Android client versions at 0.7.1; existing pairing and server protocols remain compatible.

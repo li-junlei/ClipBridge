@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="48dp" android:orientation="horizontal" android:gravity="center_vertical">
+    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_vertical" android:paddingEnd="4dp">
+        <TextView android:id="@+id/receive_title" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="match_parent" android:layout_height="18dp" android:textSize="13sp" android:singleLine="true" android:ellipsize="end" />
+        <TextView android:id="@+id/receive_name" style="@style/TextAppearance.Compat.Notification.Line2" android:layout_width="match_parent" android:layout_height="18dp" android:textSize="12sp" android:singleLine="true" android:ellipsize="middle" />
+        <ProgressBar android:id="@+id/receive_progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="4dp" android:visibility="gone" />
+    </LinearLayout>
+    <TextView android:id="@+id/receive_accept" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="52dp" android:layout_height="48dp" android:gravity="center" android:textSize="14sp" android:clickable="true" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:visibility="gone" />
+    <TextView android:id="@+id/receive_reject" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="52dp" android:layout_height="48dp" android:gravity="center" android:textSize="14sp" android:clickable="true" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:visibility="gone" />
+</LinearLayout>

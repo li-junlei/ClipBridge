@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+    <TextView android:id="@+id/receive_title" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/receive_name" style="@style/TextAppearance.Compat.Notification.Line2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="middle" />
+    <TextView android:id="@+id/receive_detail" style="@style/TextAppearance.Compat.Notification.Line2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" />
+    <ProgressBar android:id="@+id/receive_progress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="4dp" android:visibility="gone" />
+    <ImageView android:id="@+id/receive_image" android:layout_width="match_parent" android:layout_height="112dp" android:scaleType="fitCenter" android:contentDescription="图片预览" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="end">
+        <TextView android:id="@+id/receive_accept" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="52dp" android:layout_height="48dp" android:gravity="center" android:textSize="14sp" android:clickable="true" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:visibility="gone" />
+        <TextView android:id="@+id/receive_reject" style="@style/TextAppearance.Compat.Notification.Title" android:layout_width="52dp" android:layout_height="48dp" android:gravity="center" android:textSize="14sp" android:clickable="true" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

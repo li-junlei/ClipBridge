@@ -35,6 +35,9 @@
         <receiver android:name=".TransferActionReceiver" android:exported="false" />
         <receiver android:name=".TransferBootReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter></receiver>
         <!-- Cross-UID SystemUI access is required. BridgeProvider.call authorizes Binder UID; all CRUD methods deny access. -->
+        <provider android:name=".ClipboardImageProvider" android:authorities="${applicationId}.clipboard" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/clipboard_paths" />
+        </provider>
         <provider android:name=".BridgeProvider" android:authorities="io.clipbridge.android.bridge" android:exported="true" android:grantUriPermissions="false" />
     </application>
 </manifest>

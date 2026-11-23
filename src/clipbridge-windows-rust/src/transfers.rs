@@ -8,12 +8,16 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+pub const MAX_CLIPBOARD_IMAGE: u64 = 10 * 1024 * 1024;
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Offer {
     pub id: String,
     pub name: String,
     pub mime: String,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clipboard: bool,
     pub size: u64,
     pub hash: String,
     pub chunks: usize,
@@ -29,6 +33,10 @@ impl Offer {
             matches!(self.kind.as_str(), "file" | "image")
                 && matches!(self.status.as_str(), "offered" | "ready" | "cancelled")
                 && self.size <= MAX_FILE
+                && (!self.clipboard
+                    || (self.kind == "image"
+                        && self.mime == "image/png"
+                        && (1..=MAX_CLIPBOARD_IMAGE).contains(&self.size)))
                 && self.chunks == ((self.size as usize + CHUNK - 1) / CHUNK).max(1)
                 && self.hash.len() == 64
                 && self
@@ -141,6 +149,7 @@ pub async fn stage(
     kind: &str,
     peer: &str,
     pair: &str,
+    clipboard: bool,
 ) -> Result<Job> {
     ensure!(
         tokio::fs::metadata(source).await?.len() <= MAX_FILE,
@@ -183,10 +192,11 @@ pub async fn stage(
             }
             .into(),
             kind: kind.into(),
+            clipboard,
             size,
             hash: hex::encode(h.finalize()),
             chunks: ((size as usize + CHUNK - 1) / CHUNK).max(1),
-            expires: now() + 3600,
+            expires: now() + if clipboard { 120 } else { 3600 },
             status: "offered".into(),
             sender: sender.into(),
         };
@@ -318,6 +328,33 @@ pub async fn save_download(job: &Job, directory: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn clipboard_offer_respects_image_limit_and_legacy_default() {
+        let mut metadata = serde_json::json!({
+            "id": "a".repeat(32), "sender": "b".repeat(32), "name": "Clipboard.png",
+            "kind": "image", "mime": "image/png", "size": MAX_CLIPBOARD_IMAGE,
+            "chunks": MAX_CLIPBOARD_IMAGE as usize / CHUNK,
+            "hash": "c".repeat(64), "expires": now() + 120, "status": "offered"
+        });
+        let manual: Offer = serde_json::from_value(metadata.clone()).unwrap();
+        assert!(!manual.clipboard);
+        assert!(
+            serde_json::to_value(&manual)
+                .unwrap()
+                .get("clipboard")
+                .is_none()
+        );
+
+        metadata["clipboard"] = true.into();
+        let mut automatic: Offer = serde_json::from_value(metadata).unwrap();
+        assert!(automatic.validate().is_ok());
+        automatic.size += 1;
+        automatic.chunks += 1;
+        assert!(automatic.validate().is_err());
+        automatic.clipboard = false;
+        assert!(automatic.validate().is_ok());
+    }
+
     #[test]
     fn expired_indexes_are_absent_but_malformed_lifetimes_fail() {
         assert!(
